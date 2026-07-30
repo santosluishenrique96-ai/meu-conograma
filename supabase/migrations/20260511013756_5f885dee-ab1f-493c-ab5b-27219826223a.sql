@@ -1,0 +1,2 @@
+DROP POLICY "Evolution photos public read" ON storage.objects;
+CREATE POLICY "Users list own evolution photos" ON storage.objects FOR SELECT USING (bucket_id = 'evolution-photos' AND auth.uid()::text = (storage.foldername(name))[1]);
