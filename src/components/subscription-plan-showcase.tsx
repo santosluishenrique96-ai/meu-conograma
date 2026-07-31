@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { ArrowRight, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
-import { usePrepareCheckoutSession } from "@/hooks/use-billing-gateways";
+import { useCreateBillingCheckoutSessionIntent } from "@/hooks/use-billing-orchestration";
 import { usePublicPlanCatalog } from "@/hooks/use-subscription-plans";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -74,7 +74,7 @@ export function SubscriptionPlanShowcase({
   const { user } = useAuth();
   const catalogQuery = usePublicPlanCatalog();
   const [billingMode, setBillingMode] = useState<BillingMode>("monthly");
-  const prepareCheckoutMutation = usePrepareCheckoutSession();
+  const prepareCheckoutMutation = useCreateBillingCheckoutSessionIntent();
 
   const plans = useMemo(() => catalogQuery.data ?? [], [catalogQuery.data]);
 

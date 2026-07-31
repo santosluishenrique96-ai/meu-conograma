@@ -35,6 +35,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/use-auth";
+import { useStoreAdmin } from "@/hooks/use-store-admin";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables, TablesInsert } from "@/integrations/supabase/types";
 
@@ -184,7 +185,6 @@ const reasons = [
 
 const CART_STORAGE_KEY = "meu-cronograma-cart";
 const ENV_WHATSAPP_PHONE = import.meta.env.VITE_WHATSAPP_NUMBER;
-const STORE_ADMIN_EMAIL = "santosluishenrique96@gmail.com";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", {
@@ -316,6 +316,7 @@ function createEmptyProduct(nextSortOrder: number): Product {
 
 function ProdutosPage() {
   const { user } = useAuth();
+  const { isAdmin, loading: adminLoading } = useStoreAdmin();
   const navigate = useNavigate();
   const search = Route.useSearch();
   const userName = user?.user_metadata?.display_name || user?.email?.split("@")[0] || "linda";
@@ -328,8 +329,6 @@ function ProdutosPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
 
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [adminLoading, setAdminLoading] = useState(false);
   const [whatsAppNumber, setWhatsAppNumber] = useState(ENV_WHATSAPP_PHONE || "");
   const [whatsAppDraft, setWhatsAppDraft] = useState(ENV_WHATSAPP_PHONE || "");
   const [savingWhatsApp, setSavingWhatsApp] = useState(false);
@@ -421,31 +420,6 @@ function ProdutosPage() {
   useEffect(() => {
     void loadStoreSettings();
   }, [loadStoreSettings]);
-
-  useEffect(() => {
-    const loadAdminState = async () => {
-      if (!user) {
-        setIsAdmin(false);
-        setAdminLoading(false);
-        return;
-      }
-
-      setAdminLoading(true);
-
-      const { data: isCurrentAdmin, error: adminError } =
-        await supabase.rpc("current_user_is_store_admin");
-
-      if (adminError) {
-        console.error("[produtos] erro ao consultar admin atual", adminError);
-      }
-
-      const emailMatchesAdmin = user.email?.toLowerCase() === STORE_ADMIN_EMAIL;
-      setIsAdmin(Boolean(isCurrentAdmin) || emailMatchesAdmin);
-      setAdminLoading(false);
-    };
-
-    void loadAdminState();
-  }, [user]);
 
   const cartItemsCount = useMemo(
     () => cart.reduce((total, item) => total + item.quantity, 0),

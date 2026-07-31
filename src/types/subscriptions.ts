@@ -38,6 +38,13 @@ export const USER_SUBSCRIPTION_STATUSES = [
 
 export type UserSubscriptionStatus = (typeof USER_SUBSCRIPTION_STATUSES)[number];
 
+export const CURRENT_USER_SUBSCRIPTION_STATUSES = [
+  "trialing",
+  "active",
+  "past_due",
+  "incomplete",
+] as const satisfies readonly UserSubscriptionStatus[];
+
 export type SubscriptionPlanFormValues = {
   id?: string;
   name: string;

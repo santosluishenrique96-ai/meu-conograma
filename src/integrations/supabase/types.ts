@@ -347,6 +347,195 @@ export type Database = {
         };
         Relationships: [];
       };
+      billing_checkout_sessions: {
+        Row: {
+          action: string;
+          amount_snapshot: number | null;
+          billing_interval: string;
+          cancel_url: string | null;
+          canceled_at: string | null;
+          checkout_url: string | null;
+          completed_at: string | null;
+          created_at: string;
+          currency_code: string;
+          expires_at: string | null;
+          external_checkout_id: string | null;
+          external_customer_id: string | null;
+          external_subscription_id: string | null;
+          gateway: string;
+          id: string;
+          metadata: Json;
+          plan_id: string;
+          status: string;
+          subscription_id: string | null;
+          success_url: string | null;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          action: string;
+          amount_snapshot?: number | null;
+          billing_interval?: string;
+          cancel_url?: string | null;
+          canceled_at?: string | null;
+          checkout_url?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+          currency_code?: string;
+          expires_at?: string | null;
+          external_checkout_id?: string | null;
+          external_customer_id?: string | null;
+          external_subscription_id?: string | null;
+          gateway: string;
+          id?: string;
+          metadata?: Json;
+          plan_id: string;
+          status?: string;
+          subscription_id?: string | null;
+          success_url?: string | null;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          action?: string;
+          amount_snapshot?: number | null;
+          billing_interval?: string;
+          cancel_url?: string | null;
+          canceled_at?: string | null;
+          checkout_url?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+          currency_code?: string;
+          expires_at?: string | null;
+          external_checkout_id?: string | null;
+          external_customer_id?: string | null;
+          external_subscription_id?: string | null;
+          gateway?: string;
+          id?: string;
+          metadata?: Json;
+          plan_id?: string;
+          status?: string;
+          subscription_id?: string | null;
+          success_url?: string | null;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      billing_invoices: {
+        Row: {
+          amount_due: number;
+          amount_paid: number;
+          amount_refunded: number;
+          billing_reason: string;
+          created_at: string;
+          currency_code: string;
+          due_at: string | null;
+          external_invoice_id: string | null;
+          gateway: string;
+          hosted_invoice_url: string | null;
+          id: string;
+          invoice_url: string | null;
+          metadata: Json;
+          paid_at: string | null;
+          period_end: string | null;
+          period_start: string | null;
+          plan_id: string | null;
+          status: string;
+          subscription_id: string | null;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          amount_due?: number;
+          amount_paid?: number;
+          amount_refunded?: number;
+          billing_reason?: string;
+          created_at?: string;
+          currency_code?: string;
+          due_at?: string | null;
+          external_invoice_id?: string | null;
+          gateway: string;
+          hosted_invoice_url?: string | null;
+          id?: string;
+          invoice_url?: string | null;
+          metadata?: Json;
+          paid_at?: string | null;
+          period_end?: string | null;
+          period_start?: string | null;
+          plan_id?: string | null;
+          status?: string;
+          subscription_id?: string | null;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          amount_due?: number;
+          amount_paid?: number;
+          amount_refunded?: number;
+          billing_reason?: string;
+          created_at?: string;
+          currency_code?: string;
+          due_at?: string | null;
+          external_invoice_id?: string | null;
+          gateway?: string;
+          hosted_invoice_url?: string | null;
+          id?: string;
+          invoice_url?: string | null;
+          metadata?: Json;
+          paid_at?: string | null;
+          period_end?: string | null;
+          period_start?: string | null;
+          plan_id?: string | null;
+          status?: string;
+          subscription_id?: string | null;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      billing_webhook_events: {
+        Row: {
+          created_at: string;
+          event_status: string;
+          event_type: string;
+          external_event_id: string;
+          gateway: string;
+          id: string;
+          last_error: string | null;
+          payload: Json;
+          processed_at: string | null;
+          signature: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          event_status?: string;
+          event_type: string;
+          external_event_id: string;
+          gateway: string;
+          id?: string;
+          last_error?: string | null;
+          payload?: Json;
+          processed_at?: string | null;
+          signature?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          event_status?: string;
+          event_type?: string;
+          external_event_id?: string;
+          gateway?: string;
+          id?: string;
+          last_error?: string | null;
+          payload?: Json;
+          processed_at?: string | null;
+          signature?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       user_subscriptions: {
         Row: {
           auto_renew: boolean;
@@ -550,6 +739,30 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      apply_billing_subscription_event: {
+        Args: {
+          lifecycle_event: string;
+          next_status: string;
+          target_auto_renew?: boolean;
+          target_billing_interval?: string;
+          target_currency_code?: string;
+          target_current_period_ends_at?: string;
+          target_current_period_starts_at?: string;
+          target_due_at?: string;
+          target_external_customer_id?: string;
+          target_external_reference?: string;
+          target_external_subscription_id?: string;
+          target_gateway: string;
+          target_metadata?: Json;
+          target_plan_id: string;
+          target_price_snapshot?: number;
+          target_subscription_id?: string;
+          target_trial_ends_at?: string;
+          target_trial_starts_at?: string;
+          target_user_id: string;
+        };
+        Returns: string;
+      };
       current_user_is_store_admin: {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
@@ -584,12 +797,62 @@ export type Database = {
         Args: Record<PropertyKey, never>;
         Returns: string;
       };
+      record_billing_checkout_session: {
+        Args: {
+          target_action: string;
+          target_amount_snapshot?: number;
+          target_billing_interval?: string;
+          target_cancel_url?: string;
+          target_checkout_url?: string;
+          target_currency_code?: string;
+          target_expires_at?: string;
+          target_gateway: string;
+          target_metadata?: Json;
+          target_plan_id: string;
+          target_subscription_id?: string;
+          target_success_url?: string;
+        };
+        Returns: string;
+      };
+      register_billing_webhook_event: {
+        Args: {
+          target_event_type: string;
+          target_external_event_id: string;
+          target_gateway: string;
+          target_payload?: Json;
+          target_signature?: string;
+        };
+        Returns: string;
+      };
       sync_user_subscription_state: {
         Args: {
           target_subscription_id: string;
           sync_event_type?: string;
         };
         Returns: undefined;
+      };
+      upsert_billing_invoice: {
+        Args: {
+          target_amount_due?: number;
+          target_amount_paid?: number;
+          target_amount_refunded?: number;
+          target_billing_reason?: string;
+          target_currency_code?: string;
+          target_due_at?: string;
+          target_external_invoice_id?: string;
+          target_gateway?: string;
+          target_hosted_invoice_url?: string;
+          target_invoice_url?: string;
+          target_metadata?: Json;
+          target_paid_at?: string;
+          target_period_end?: string;
+          target_period_start?: string;
+          target_plan_id?: string;
+          target_status?: string;
+          target_subscription_id?: string;
+          target_user_id: string;
+        };
+        Returns: string;
       };
       user_has_feature_access: {
         Args: {

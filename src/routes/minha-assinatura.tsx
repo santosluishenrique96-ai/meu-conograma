@@ -29,13 +29,17 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import {
   useBillingGateways,
-  usePrepareBillingPortalAction,
-  usePrepareCheckoutSession,
 } from "@/hooks/use-billing-gateways";
+import {
+  useCreateBillingCheckoutSessionIntent,
+  useCreateBillingPortalActionIntent,
+  useUserBillingSnapshot,
+} from "@/hooks/use-billing-orchestration";
 import {
   useProvisionUserSubscription,
   useUserSubscriptionSnapshot,
 } from "@/hooks/use-user-subscriptions";
+import type { BillingCheckoutSessionRow, BillingInvoiceRow } from "@/types/billing";
 import type { UserSubscriptionHistoryRow, UserSubscriptionStatus } from "@/types/subscriptions";
 
 export const Route = createFileRoute("/minha-assinatura")({
@@ -101,6 +105,26 @@ const historyEventLabels: Record<string, string> = {
   migration_snapshot: "Historico importado",
 };
 
+const billingSessionStatusLabels: Record<string, string> = {
+  draft: "Rascunho",
+  pending: "Pendente",
+  completed: "Concluida",
+  expired: "Expirada",
+  canceled: "Cancelada",
+  failed: "Falhou",
+};
+
+const invoiceStatusLabels: Record<string, string> = {
+  draft: "Rascunho",
+  open: "Aberta",
+  paid: "Paga",
+  past_due: "Em atraso",
+  void: "Cancelada",
+  uncollectible: "Nao recuperavel",
+  refunded: "Reembolsada",
+  failed: "Falhou",
+};
+
 function formatDate(value: string | null | undefined) {
   if (!value) return "Nao definido";
 
@@ -121,6 +145,27 @@ function formatDateTime(value: string | null | undefined) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatDateTimeShort(value: string | null | undefined) {
+  if (!value) return "Nao definido";
+
+  return new Date(value).toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatCurrency(value: number | null | undefined) {
+  if (value === null || value === undefined) return "Nao definido";
+
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(value);
 }
 
 function getDaysRemaining(value: string | null | undefined) {
@@ -156,16 +201,53 @@ function getHistoryDescription(item: UserSubscriptionHistoryRow) {
   return "Evento registrado no historico da assinatura.";
 }
 
+function getCheckoutSessionDescription(item: BillingCheckoutSessionRow) {
+  if (item.action === "subscribe") {
+    return "Tentativa de iniciar uma nova assinatura pelo checkout.";
+  }
+
+  if (item.action === "upgrade") {
+    return "Tentativa de upgrade preparada para o plano superior.";
+  }
+
+  if (item.action === "downgrade") {
+    return "Troca para um plano mais enxuto preparada para o checkout.";
+  }
+
+  if (item.action === "reactivate") {
+    return "Reativacao preparada para retomar a cobranca e o acesso.";
+  }
+
+  return "Sessao de checkout registrada.";
+}
+
+function getInvoiceDescription(item: BillingInvoiceRow) {
+  if (item.billing_reason === "subscription_create") {
+    return "Fatura gerada na entrada de uma nova assinatura.";
+  }
+
+  if (item.billing_reason === "subscription_cycle") {
+    return "Fatura referente ao ciclo recorrente da assinatura.";
+  }
+
+  if (item.billing_reason === "subscription_update") {
+    return "Fatura gerada por upgrade, downgrade ou ajuste no plano.";
+  }
+
+  return "Registro financeiro preparado para a integracao do gateway.";
+}
+
 function MinhaAssinaturaPage() {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
 
   const snapshotQuery = useUserSubscriptionSnapshot(user?.id);
+  const billingSnapshotQuery = useUserBillingSnapshot(user?.id);
   const provisionMutation = useProvisionUserSubscription();
   const gatewayQuery = useBillingGateways();
-  const prepareCheckoutMutation = usePrepareCheckoutSession();
-  const prepareBillingActionMutation = usePrepareBillingPortalAction();
+  const prepareCheckoutMutation = useCreateBillingCheckoutSessionIntent();
+  const prepareBillingActionMutation = useCreateBillingPortalActionIntent();
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -188,6 +270,9 @@ function MinhaAssinaturaPage() {
   const currentSubscription = snapshot?.currentSubscription ?? null;
   const state = snapshot?.state ?? null;
   const history = snapshot?.history ?? [];
+  const billingSnapshot = billingSnapshotQuery.data;
+  const checkoutSessions = billingSnapshot?.checkoutSessions ?? [];
+  const invoices = billingSnapshot?.invoices ?? [];
 
   const currentStatus = (state?.status ??
     currentSubscription?.status ??
@@ -589,6 +674,151 @@ function MinhaAssinaturaPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </section>
+
+            <section className="mt-8 grid gap-6 xl:grid-cols-2">
+              <div className="rounded-3xl border border-border bg-gradient-card p-6 md:p-8">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-black">Tentativas de checkout</h2>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Cada fluxo preparado fica salvo para integracao futura com confirmacao,
+                      retorno do checkout e webhook.
+                    </p>
+                  </div>
+                  <Badge variant="outline">
+                    {checkoutSessions.length} {checkoutSessions.length === 1 ? "sessao" : "sessoes"}
+                  </Badge>
+                </div>
+
+                {billingSnapshotQuery.isLoading ? (
+                  <div className="mt-6 flex items-center gap-3 rounded-2xl border border-border bg-background/50 p-5 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Carregando sessoes de checkout...
+                  </div>
+                ) : checkoutSessions.length === 0 ? (
+                  <div className="mt-6 rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+                    Nenhuma tentativa de checkout foi registrada ainda.
+                  </div>
+                ) : (
+                  <div className="mt-6 space-y-4">
+                    {checkoutSessions.slice(0, 4).map((item) => (
+                      <div key={item.id} className="rounded-2xl border border-border bg-background/50 p-5">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-lg font-black capitalize">{item.action}</div>
+                              <Badge variant="secondary">
+                                {billingSessionStatusLabels[item.status] ?? item.status}
+                              </Badge>
+                            </div>
+                            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                              {getCheckoutSessionDescription(item)}
+                            </p>
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {formatDateTimeShort(item.created_at)}
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid gap-3 md:grid-cols-3">
+                          <div className="rounded-2xl border border-border bg-card/50 p-4">
+                            <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                              Gateway
+                            </div>
+                            <div className="mt-2 font-semibold capitalize">{item.gateway}</div>
+                          </div>
+                          <div className="rounded-2xl border border-border bg-card/50 p-4">
+                            <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                              Valor
+                            </div>
+                            <div className="mt-2 font-semibold">
+                              {formatCurrency(item.amount_snapshot)}
+                            </div>
+                          </div>
+                          <div className="rounded-2xl border border-border bg-card/50 p-4">
+                            <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                              Intervalo
+                            </div>
+                            <div className="mt-2 font-semibold">
+                              {item.billing_interval === "annual" ? "Anual" : "Mensal"}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-3xl border border-border bg-gradient-card p-6 md:p-8">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-black">Faturas</h2>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      A estrutura de invoices ja esta preparada para registrar pagamento, falha,
+                      renovacao, cancelamento e historico financeiro.
+                    </p>
+                  </div>
+                  <Badge variant="outline">
+                    {invoices.length} {invoices.length === 1 ? "fatura" : "faturas"}
+                  </Badge>
+                </div>
+
+                {billingSnapshotQuery.isLoading ? (
+                  <div className="mt-6 flex items-center gap-3 rounded-2xl border border-border bg-background/50 p-5 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Carregando faturas...
+                  </div>
+                ) : invoices.length === 0 ? (
+                  <div className="mt-6 rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+                    As faturas vao aparecer aqui assim que o gateway real comecar a sincronizar os
+                    cobrancas e webhooks.
+                  </div>
+                ) : (
+                  <div className="mt-6 space-y-4">
+                    {invoices.slice(0, 4).map((item) => (
+                      <div key={item.id} className="rounded-2xl border border-border bg-background/50 p-5">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-lg font-black">
+                                {invoiceStatusLabels[item.status] ?? item.status}
+                              </div>
+                              <Badge variant="secondary">{item.billing_reason}</Badge>
+                            </div>
+                            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                              {getInvoiceDescription(item)}
+                            </p>
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {formatDateTimeShort(item.created_at)}
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid gap-3 md:grid-cols-3">
+                          <div className="rounded-2xl border border-border bg-card/50 p-4">
+                            <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                              Valor devido
+                            </div>
+                            <div className="mt-2 font-semibold">{formatCurrency(item.amount_due)}</div>
+                          </div>
+                          <div className="rounded-2xl border border-border bg-card/50 p-4">
+                            <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                              Valor pago
+                            </div>
+                            <div className="mt-2 font-semibold">{formatCurrency(item.amount_paid)}</div>
+                          </div>
+                          <div className="rounded-2xl border border-border bg-card/50 p-4">
+                            <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                              Vencimento
+                            </div>
+                            <div className="mt-2 font-semibold">{formatDate(item.due_at)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </section>
 

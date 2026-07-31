@@ -1,4 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
+import {
+  CURRENT_USER_SUBSCRIPTION_STATUSES,
+} from "@/types/subscriptions";
 import type {
   SubscriptionPlanCatalogItem,
   SubscriptionPlanFormValues,
@@ -132,6 +135,23 @@ export async function updateSubscriptionPlanOrder(
 }
 
 export async function getCurrentUserSubscription(userId: string) {
+  const { data: prioritized, error: prioritizedError } = await supabase
+    .from("user_subscriptions")
+    .select("*")
+    .eq("user_id", userId)
+    .in("status", [...CURRENT_USER_SUBSCRIPTION_STATUSES])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (prioritizedError) {
+    throw prioritizedError;
+  }
+
+  if (prioritized) {
+    return prioritized as UserSubscriptionRow;
+  }
+
   const { data, error } = await supabase
     .from("user_subscriptions")
     .select("*")

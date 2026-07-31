@@ -1,9 +1,17 @@
+import type { Tables, TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import type {
   SubscriptionBillingInterval,
   SubscriptionPlanCatalogItem,
   SubscriptionPlanRow,
   UserSubscriptionRow,
 } from "@/types/subscriptions";
+
+export type BillingCheckoutSessionRow = Tables<"billing_checkout_sessions">;
+export type BillingCheckoutSessionInsert = TablesInsert<"billing_checkout_sessions">;
+export type BillingCheckoutSessionUpdate = TablesUpdate<"billing_checkout_sessions">;
+export type BillingInvoiceRow = Tables<"billing_invoices">;
+export type BillingInvoiceInsert = TablesInsert<"billing_invoices">;
+export type BillingWebhookEventRow = Tables<"billing_webhook_events">;
 
 export const BILLING_GATEWAY_KEYS = [
   "stripe",
@@ -30,6 +38,31 @@ export const BILLING_GATEWAY_CAPABILITIES = [
 ] as const;
 
 export type BillingGatewayCapability = (typeof BILLING_GATEWAY_CAPABILITIES)[number];
+
+export const BILLING_CHECKOUT_SESSION_STATUSES = [
+  "draft",
+  "pending",
+  "completed",
+  "expired",
+  "canceled",
+  "failed",
+] as const;
+
+export type BillingCheckoutSessionStatus =
+  (typeof BILLING_CHECKOUT_SESSION_STATUSES)[number];
+
+export const BILLING_INVOICE_STATUSES = [
+  "draft",
+  "open",
+  "paid",
+  "past_due",
+  "void",
+  "uncollectible",
+  "refunded",
+  "failed",
+] as const;
+
+export type BillingInvoiceStatus = (typeof BILLING_INVOICE_STATUSES)[number];
 
 export const BILLING_ACTION_TYPES = [
   "subscribe",
@@ -96,6 +129,7 @@ export type PrepareCheckoutSessionInput = {
 };
 
 export type PreparedCheckoutSession = {
+  id?: string;
   gateway: BillingGatewayDefinition;
   action: PrepareCheckoutSessionInput["action"];
   planId: string;
@@ -124,6 +158,11 @@ export type PreparedBillingPortalAction = {
   message: string;
   isLive: boolean;
   metadata: Record<string, string | number | boolean | null>;
+};
+
+export type UserBillingSnapshot = {
+  checkoutSessions: BillingCheckoutSessionRow[];
+  invoices: BillingInvoiceRow[];
 };
 
 export interface BillingGatewayAdapter {

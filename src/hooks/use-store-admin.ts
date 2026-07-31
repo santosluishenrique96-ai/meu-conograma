@@ -2,8 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 
-const STORE_ADMIN_EMAIL = "santosluishenrique96@gmail.com";
-
 export function useStoreAdmin() {
   const { user, loading: authLoading } = useAuth();
 
@@ -17,8 +15,7 @@ export function useStoreAdmin() {
         throw error;
       }
 
-      const emailMatchesAdmin = user?.email?.toLowerCase() === STORE_ADMIN_EMAIL;
-      return Boolean(data) || emailMatchesAdmin;
+      return Boolean(data);
     },
     staleTime: 60_000,
   });
