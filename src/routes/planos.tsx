@@ -462,6 +462,12 @@ function PlanosPage() {
 
           <div className="flex flex-col gap-3 sm:flex-row">
             <Link
+              to="/financeiro"
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-border bg-background/70 px-5 py-3 text-sm font-bold transition-smooth hover:border-primary hover:text-primary"
+            >
+              <Sparkles className="h-4 w-4" /> Dashboard financeiro
+            </Link>
+            <Link
               to="/produtos"
               search={{ focus: undefined }}
               className="inline-flex items-center justify-center gap-2 rounded-full border border-border bg-background/70 px-5 py-3 text-sm font-bold transition-smooth hover:border-primary hover:text-primary"

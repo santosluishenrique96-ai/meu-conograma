@@ -105,6 +105,50 @@ export type CurrentUserFeatureAccess = {
   reason: FeatureAccessReason;
 };
 
+export type SubscriptionFinancialTrendPoint = {
+  monthKey: string;
+  monthLabel: string;
+  newSubscriptions: number;
+  conversions: number;
+  cancellations: number;
+};
+
+export type SubscriptionFinancialPlanBreakdown = {
+  planId: string;
+  planName: string;
+  planSlug: string;
+  color: string;
+  subscribers: number;
+  payingSubscribers: number;
+  trialSubscribers: number;
+  monthlyRecurringRevenue: number;
+  annualRecurringRevenue: number;
+};
+
+export type SubscriptionFinancialStatusBreakdown = {
+  status: UserSubscriptionStatus;
+  label: string;
+  count: number;
+};
+
+export type SubscriptionFinancialDashboard = {
+  generatedAt: string;
+  monthlyRecurringRevenue: number;
+  annualRecurringRevenue: number;
+  subscriberCount: number;
+  freePlanSubscribers: number;
+  essentialPlanSubscribers: number;
+  premiumPlanSubscribers: number;
+  cancellationsCount: number;
+  renewalsCount: number;
+  conversionsCount: number;
+  activeTrialsCount: number;
+  averageTicket: number;
+  planBreakdown: SubscriptionFinancialPlanBreakdown[];
+  growthSeries: SubscriptionFinancialTrendPoint[];
+  statusBreakdown: SubscriptionFinancialStatusBreakdown[];
+};
+
 export const EMPTY_SUBSCRIPTION_PLAN_FORM: SubscriptionPlanFormValues = {
   name: "",
   description: "",

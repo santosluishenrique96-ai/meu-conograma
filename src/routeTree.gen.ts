@@ -14,6 +14,7 @@ import { Route as AssinaturaRouteImport } from './routes/assinatura'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as CronogramaRouteImport } from './routes/cronograma'
 import { Route as EvolucaoRouteImport } from './routes/evolucao'
+import { Route as FinanceiroRouteImport } from './routes/financeiro'
 import { Route as MinhaAssinaturaRouteImport } from './routes/minha-assinatura'
 import { Route as PlanosRouteImport } from './routes/planos'
 import { Route as ProdutosRouteImport } from './routes/produtos'
@@ -43,6 +44,11 @@ const EvolucaoRoute = EvolucaoRouteImport.update({
   path: '/evolucao',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FinanceiroRoute = FinanceiroRouteImport.update({
+  id: '/financeiro',
+  path: '/financeiro',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MinhaAssinaturaRoute = MinhaAssinaturaRouteImport.update({
   id: '/minha-assinatura',
   path: '/minha-assinatura',
@@ -65,6 +71,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/cronograma': typeof CronogramaRoute
   '/evolucao': typeof EvolucaoRoute
+  '/financeiro': typeof FinanceiroRoute
   '/minha-assinatura': typeof MinhaAssinaturaRoute
   '/planos': typeof PlanosRoute
   '/produtos': typeof ProdutosRoute
@@ -75,6 +82,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/cronograma': typeof CronogramaRoute
   '/evolucao': typeof EvolucaoRoute
+  '/financeiro': typeof FinanceiroRoute
   '/minha-assinatura': typeof MinhaAssinaturaRoute
   '/planos': typeof PlanosRoute
   '/produtos': typeof ProdutosRoute
@@ -86,6 +94,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/cronograma': typeof CronogramaRoute
   '/evolucao': typeof EvolucaoRoute
+  '/financeiro': typeof FinanceiroRoute
   '/minha-assinatura': typeof MinhaAssinaturaRoute
   '/planos': typeof PlanosRoute
   '/produtos': typeof ProdutosRoute
@@ -98,6 +107,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/cronograma'
     | '/evolucao'
+    | '/financeiro'
     | '/minha-assinatura'
     | '/planos'
     | '/produtos'
@@ -108,6 +118,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/cronograma'
     | '/evolucao'
+    | '/financeiro'
     | '/minha-assinatura'
     | '/planos'
     | '/produtos'
@@ -118,6 +129,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/cronograma'
     | '/evolucao'
+    | '/financeiro'
     | '/minha-assinatura'
     | '/planos'
     | '/produtos'
@@ -129,6 +141,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   CronogramaRoute: typeof CronogramaRoute
   EvolucaoRoute: typeof EvolucaoRoute
+  FinanceiroRoute: typeof FinanceiroRoute
   MinhaAssinaturaRoute: typeof MinhaAssinaturaRoute
   PlanosRoute: typeof PlanosRoute
   ProdutosRoute: typeof ProdutosRoute
@@ -171,6 +184,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EvolucaoRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/financeiro': {
+      id: '/financeiro'
+      path: '/financeiro'
+      fullPath: '/financeiro'
+      preLoaderRoute: typeof FinanceiroRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/minha-assinatura': {
       id: '/minha-assinatura'
       path: '/minha-assinatura'
@@ -201,6 +221,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   CronogramaRoute: CronogramaRoute,
   EvolucaoRoute: EvolucaoRoute,
+  FinanceiroRoute: FinanceiroRoute,
   MinhaAssinaturaRoute: MinhaAssinaturaRoute,
   PlanosRoute: PlanosRoute,
   ProdutosRoute: ProdutosRoute,

@@ -53,6 +53,7 @@ export function useSubscriptionPlanAdminMutations() {
       queryClient.invalidateQueries({ queryKey: ["user-subscription-history"] }),
       queryClient.invalidateQueries({ queryKey: ["user-subscription-record"] }),
       queryClient.invalidateQueries({ queryKey: ["user-subscription-snapshot"] }),
+      queryClient.invalidateQueries({ queryKey: ["subscription-financial-dashboard"] }),
       queryClient.invalidateQueries({ queryKey: ["plan-feature-access"] }),
       queryClient.invalidateQueries({ queryKey: ["user-plan-permissions"] }),
     ]);
