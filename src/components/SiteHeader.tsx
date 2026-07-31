@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
 
-const navItems = [
+const publicNavItems = [
   { to: "/", label: "Início" },
   { to: "/assinatura", label: "Planos" },
   { to: "/produtos", label: "Produtos" },
@@ -18,6 +18,9 @@ export function SiteHeader() {
   const location = useRouterState({ select: (state) => state.location.href });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const userName = user?.user_metadata?.display_name || user?.email?.split("@")[0];
+  const navItems = user
+    ? [...publicNavItems, { to: "/minha-assinatura", label: "Minha Assinatura" }]
+    : publicNavItems;
 
   useEffect(() => {
     setMobileMenuOpen(false);

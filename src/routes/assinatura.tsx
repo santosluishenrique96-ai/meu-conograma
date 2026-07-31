@@ -48,10 +48,10 @@ function AssinaturaPage() {
                 <ArrowRight className="h-4 w-4" />
               </Link>
               <Link
-                to="/"
+                to={user ? "/minha-assinatura" : "/"}
                 className="inline-flex items-center justify-center rounded-full border border-border bg-background/70 px-8 py-3.5 font-bold transition-smooth hover:border-primary hover:text-primary"
               >
-                Voltar para o início
+                {user ? "Abrir Minha Assinatura" : "Voltar para o início"}
               </Link>
             </div>
           </div>
