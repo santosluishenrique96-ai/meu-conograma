@@ -174,26 +174,23 @@ export async function getPlanEnabledFeatureKeys(planId: string) {
 }
 
 export async function getCurrentUserPlanPermissionSnapshot(userId: string) {
-  const { data: subscription, error: subscriptionError } = await supabase
-    .from("user_subscriptions")
-    .select("plan_id, status")
+  const { data: state, error: stateError } = await supabase
+    .from("user_subscription_state")
+    .select("current_plan_id, status")
     .eq("user_id", userId)
-    .in("status", ["trialing", "active", "past_due", "incomplete"])
-    .order("created_at", { ascending: false })
-    .limit(1)
     .maybeSingle();
 
-  if (subscriptionError) {
-    throw subscriptionError;
+  if (stateError) {
+    throw stateError;
   }
 
   let plan: SubscriptionPlanRow | null = null;
 
-  if (subscription?.plan_id) {
+  if (state?.current_plan_id) {
     const { data, error } = await supabase
       .from("subscription_plans")
       .select("*")
-      .eq("id", subscription.plan_id)
+      .eq("id", state.current_plan_id)
       .maybeSingle();
 
     if (error) {

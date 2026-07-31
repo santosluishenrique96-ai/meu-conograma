@@ -349,6 +349,7 @@ export type Database = {
       };
       user_subscriptions: {
         Row: {
+          auto_renew: boolean;
           billing_interval: string;
           canceled_at: string | null;
           created_at: string;
@@ -356,23 +357,30 @@ export type Database = {
           currency_code: string;
           current_period_ends_at: string | null;
           current_period_starts_at: string | null;
+          due_at: string | null;
           ends_at: string | null;
           external_reference: string | null;
           id: string;
           metadata: Json;
+          origin: string;
           plan_id: string;
           price_snapshot: number | null;
           provider: string;
           provider_customer_id: string | null;
           provider_subscription_id: string | null;
+          renewal_count: number;
+          started_at: string | null;
           status: string;
+          trial_days_snapshot: number;
           trial_ends_at: string | null;
           trial_starts_at: string | null;
+          trial_used: boolean;
           updated_at: string;
           updated_by: string | null;
           user_id: string;
         };
         Insert: {
+          auto_renew?: boolean;
           billing_interval?: string;
           canceled_at?: string | null;
           created_at?: string;
@@ -380,23 +388,30 @@ export type Database = {
           currency_code?: string;
           current_period_ends_at?: string | null;
           current_period_starts_at?: string | null;
+          due_at?: string | null;
           ends_at?: string | null;
           external_reference?: string | null;
           id?: string;
           metadata?: Json;
+          origin?: string;
           plan_id: string;
           price_snapshot?: number | null;
           provider?: string;
           provider_customer_id?: string | null;
           provider_subscription_id?: string | null;
+          renewal_count?: number;
+          started_at?: string | null;
           status?: string;
+          trial_days_snapshot?: number;
           trial_ends_at?: string | null;
           trial_starts_at?: string | null;
+          trial_used?: boolean;
           updated_at?: string;
           updated_by?: string | null;
           user_id: string;
         };
         Update: {
+          auto_renew?: boolean;
           billing_interval?: string;
           canceled_at?: string | null;
           created_at?: string;
@@ -404,20 +419,128 @@ export type Database = {
           currency_code?: string;
           current_period_ends_at?: string | null;
           current_period_starts_at?: string | null;
+          due_at?: string | null;
           ends_at?: string | null;
           external_reference?: string | null;
           id?: string;
           metadata?: Json;
+          origin?: string;
           plan_id?: string;
           price_snapshot?: number | null;
           provider?: string;
           provider_customer_id?: string | null;
           provider_subscription_id?: string | null;
+          renewal_count?: number;
+          started_at?: string | null;
+          status?: string;
+          trial_days_snapshot?: number;
+          trial_ends_at?: string | null;
+          trial_starts_at?: string | null;
+          trial_used?: boolean;
+          updated_at?: string;
+          updated_by?: string | null;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      user_subscription_history: {
+        Row: {
+          auto_renew: boolean;
+          created_at: string;
+          due_at: string | null;
+          event_type: string;
+          id: string;
+          payload: Json;
+          plan_id: string | null;
+          started_at: string | null;
+          status: string;
+          subscription_id: string | null;
+          trial_ends_at: string | null;
+          trial_starts_at: string | null;
+          user_id: string;
+        };
+        Insert: {
+          auto_renew?: boolean;
+          created_at?: string;
+          due_at?: string | null;
+          event_type: string;
+          id?: string;
+          payload?: Json;
+          plan_id?: string | null;
+          started_at?: string | null;
+          status: string;
+          subscription_id?: string | null;
+          trial_ends_at?: string | null;
+          trial_starts_at?: string | null;
+          user_id: string;
+        };
+        Update: {
+          auto_renew?: boolean;
+          created_at?: string;
+          due_at?: string | null;
+          event_type?: string;
+          id?: string;
+          payload?: Json;
+          plan_id?: string | null;
+          started_at?: string | null;
+          status?: string;
+          subscription_id?: string | null;
+          trial_ends_at?: string | null;
+          trial_starts_at?: string | null;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      user_subscription_state: {
+        Row: {
+          auto_renew: boolean;
+          created_at: string;
+          current_plan_id: string | null;
+          current_subscription_id: string | null;
+          due_at: string | null;
+          id: string;
+          last_history_event_at: string | null;
+          renewal_count: number;
+          started_at: string | null;
+          status: string;
+          trial_ends_at: string | null;
+          trial_starts_at: string | null;
+          trial_used: boolean;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          auto_renew?: boolean;
+          created_at?: string;
+          current_plan_id?: string | null;
+          current_subscription_id?: string | null;
+          due_at?: string | null;
+          id?: string;
+          last_history_event_at?: string | null;
+          renewal_count?: number;
+          started_at?: string | null;
           status?: string;
           trial_ends_at?: string | null;
           trial_starts_at?: string | null;
+          trial_used?: boolean;
           updated_at?: string;
-          updated_by?: string | null;
+          user_id: string;
+        };
+        Update: {
+          auto_renew?: boolean;
+          created_at?: string;
+          current_plan_id?: string | null;
+          current_subscription_id?: string | null;
+          due_at?: string | null;
+          id?: string;
+          last_history_event_at?: string | null;
+          renewal_count?: number;
+          started_at?: string | null;
+          status?: string;
+          trial_ends_at?: string | null;
+          trial_starts_at?: string | null;
+          trial_used?: boolean;
+          updated_at?: string;
           user_id?: string;
         };
         Relationships: [];
@@ -431,9 +554,30 @@ export type Database = {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
       };
+      get_default_subscription_plan_id: {
+        Args: Record<PropertyKey, never>;
+        Returns: string;
+      };
       has_store_admins: {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
+      };
+      provision_default_subscription_for_user: {
+        Args: {
+          target_user_id: string;
+        };
+        Returns: string;
+      };
+      provision_current_user_subscription: {
+        Args: Record<PropertyKey, never>;
+        Returns: string;
+      };
+      sync_user_subscription_state: {
+        Args: {
+          target_subscription_id: string;
+          sync_event_type?: string;
+        };
+        Returns: undefined;
       };
     };
     Enums: {

@@ -49,6 +49,10 @@ export function useSubscriptionPlanAdminMutations() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["subscription-plans"] }),
       queryClient.invalidateQueries({ queryKey: ["user-subscription"] }),
+      queryClient.invalidateQueries({ queryKey: ["user-subscription-state"] }),
+      queryClient.invalidateQueries({ queryKey: ["user-subscription-history"] }),
+      queryClient.invalidateQueries({ queryKey: ["user-subscription-record"] }),
+      queryClient.invalidateQueries({ queryKey: ["user-subscription-snapshot"] }),
       queryClient.invalidateQueries({ queryKey: ["plan-feature-access"] }),
       queryClient.invalidateQueries({ queryKey: ["user-plan-permissions"] }),
     ]);

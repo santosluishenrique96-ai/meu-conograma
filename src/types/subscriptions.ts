@@ -7,6 +7,8 @@ export type SubscriptionFeatureRow = Tables<"subscription_features">;
 export type SubscriptionFeatureInsert = TablesInsert<"subscription_features">;
 export type PlanFeatureAccessRow = Tables<"plan_feature_access">;
 export type UserSubscriptionRow = Tables<"user_subscriptions">;
+export type UserSubscriptionStateRow = Tables<"user_subscription_state">;
+export type UserSubscriptionHistoryRow = Tables<"user_subscription_history">;
 
 export const SUBSCRIPTION_PLAN_ICON_OPTIONS = [
   "sparkles",
@@ -71,6 +73,13 @@ export type SubscriptionPlanCatalogItem = SubscriptionPlanRow & {
     description: string;
     category: string;
   }>;
+};
+
+export type UserSubscriptionSnapshot = {
+  currentPlan: SubscriptionPlanRow | null;
+  currentSubscription: UserSubscriptionRow | null;
+  state: UserSubscriptionStateRow | null;
+  history: UserSubscriptionHistoryRow[];
 };
 
 export const EMPTY_SUBSCRIPTION_PLAN_FORM: SubscriptionPlanFormValues = {
