@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as CronogramaRouteImport } from './routes/cronograma'
 import { Route as EvolucaoRouteImport } from './routes/evolucao'
+import { Route as PlanosRouteImport } from './routes/planos'
 import { Route as ProdutosRouteImport } from './routes/produtos'
 
 const IndexRoute = IndexRouteImport.update({
@@ -35,6 +36,11 @@ const EvolucaoRoute = EvolucaoRouteImport.update({
   path: '/evolucao',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlanosRoute = PlanosRouteImport.update({
+  id: '/planos',
+  path: '/planos',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProdutosRoute = ProdutosRouteImport.update({
   id: '/produtos',
   path: '/produtos',
@@ -46,6 +52,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/cronograma': typeof CronogramaRoute
   '/evolucao': typeof EvolucaoRoute
+  '/planos': typeof PlanosRoute
   '/produtos': typeof ProdutosRoute
 }
 export interface FileRoutesByTo {
@@ -53,6 +60,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/cronograma': typeof CronogramaRoute
   '/evolucao': typeof EvolucaoRoute
+  '/planos': typeof PlanosRoute
   '/produtos': typeof ProdutosRoute
 }
 export interface FileRoutesById {
@@ -61,14 +69,28 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/cronograma': typeof CronogramaRoute
   '/evolucao': typeof EvolucaoRoute
+  '/planos': typeof PlanosRoute
   '/produtos': typeof ProdutosRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/cronograma' | '/evolucao' | '/produtos'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/cronograma'
+    | '/evolucao'
+    | '/planos'
+    | '/produtos'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/cronograma' | '/evolucao' | '/produtos'
-  id: '__root__' | '/' | '/auth' | '/cronograma' | '/evolucao' | '/produtos'
+  to: '/' | '/auth' | '/cronograma' | '/evolucao' | '/planos' | '/produtos'
+  id:
+    | '__root__'
+    | '/'
+    | '/auth'
+    | '/cronograma'
+    | '/evolucao'
+    | '/planos'
+    | '/produtos'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -76,6 +98,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   CronogramaRoute: typeof CronogramaRoute
   EvolucaoRoute: typeof EvolucaoRoute
+  PlanosRoute: typeof PlanosRoute
   ProdutosRoute: typeof ProdutosRoute
 }
 
@@ -109,6 +132,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EvolucaoRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/planos': {
+      id: '/planos'
+      path: '/planos'
+      fullPath: '/planos'
+      preLoaderRoute: typeof PlanosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/produtos': {
       id: '/produtos'
       path: '/produtos'
@@ -124,6 +154,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   CronogramaRoute: CronogramaRoute,
   EvolucaoRoute: EvolucaoRoute,
+  PlanosRoute: PlanosRoute,
   ProdutosRoute: ProdutosRoute,
 }
 export const routeTree = rootRouteImport

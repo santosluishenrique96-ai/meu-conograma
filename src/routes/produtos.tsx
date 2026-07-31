@@ -994,6 +994,12 @@ function ProdutosPage() {
                 </div>
               ) : (
                 <div className="flex flex-col gap-3 sm:flex-row">
+                  <Link
+                    to="/planos"
+                    className="inline-flex items-center justify-center gap-2 rounded-full border border-border bg-background/70 px-6 py-3 font-bold transition-smooth hover:border-primary hover:text-primary"
+                  >
+                    <Sparkles className="h-4 w-4" /> Gerenciar planos
+                  </Link>
                   <Button
                     type="button"
                     onClick={openNewProductEditor}
