@@ -554,9 +554,21 @@ export type Database = {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
       };
+      current_user_has_feature_access: {
+        Args: {
+          required_feature_key: string;
+        };
+        Returns: boolean;
+      };
       get_default_subscription_plan_id: {
         Args: Record<PropertyKey, never>;
         Returns: string;
+      };
+      get_current_user_feature_access: {
+        Args: {
+          required_feature_key: string;
+        };
+        Returns: Json;
       };
       has_store_admins: {
         Args: Record<PropertyKey, never>;
@@ -578,6 +590,13 @@ export type Database = {
           sync_event_type?: string;
         };
         Returns: undefined;
+      };
+      user_has_feature_access: {
+        Args: {
+          target_user_id: string;
+          required_feature_key: string;
+        };
+        Returns: boolean;
       };
     };
     Enums: {

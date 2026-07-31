@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import type {
+  CurrentUserFeatureAccess,
   PlanFeatureAccessMap,
   PlanFeatureAccessRow,
   SubscriptionFeatureFormValues,
@@ -171,6 +172,33 @@ export async function getPlanEnabledFeatureKeys(planId: string) {
   }
 
   return (features ?? []).map((feature) => feature.feature_key);
+}
+
+export async function getCurrentUserFeatureAccess(featureKey: string) {
+  const { data, error } = await supabase.rpc("get_current_user_feature_access", {
+    required_feature_key: featureKey,
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  const payload = (data ?? {}) as Record<string, unknown>;
+
+  return {
+    featureKey: String(payload.feature_key ?? featureKey),
+    featureName: (payload.feature_name as string | null) ?? null,
+    featureDescription: (payload.feature_description as string | null) ?? null,
+    hasAccess: Boolean(payload.has_access),
+    currentPlanId: (payload.current_plan_id as string | null) ?? null,
+    currentPlanName: (payload.current_plan_name as string | null) ?? null,
+    currentPlanSlug: (payload.current_plan_slug as string | null) ?? null,
+    subscriptionStatus: (payload.subscription_status as string | null) ?? null,
+    recommendedPlanId: (payload.recommended_plan_id as string | null) ?? null,
+    recommendedPlanName: (payload.recommended_plan_name as string | null) ?? null,
+    recommendedPlanSlug: (payload.recommended_plan_slug as string | null) ?? null,
+    reason: (payload.reason as CurrentUserFeatureAccess["reason"]) ?? "upgrade_required",
+  } satisfies CurrentUserFeatureAccess;
 }
 
 export async function getCurrentUserPlanPermissionSnapshot(userId: string) {

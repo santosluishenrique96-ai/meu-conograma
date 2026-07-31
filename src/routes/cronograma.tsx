@@ -21,8 +21,10 @@ import {
   ShoppingBag,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { FeatureAccessGuard } from "@/components/feature-access-guard";
 import { SiteHeader } from "@/components/SiteHeader";
 import { useAuth } from "@/hooks/use-auth";
+import { useFeatureAccess } from "@/hooks/use-subscription-permissions";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -511,6 +513,11 @@ function CronogramaPage() {
   const [saving, setSaving] = useState(false);
   const [selectedConcerns, setSelectedConcerns] = useState<string[]>([]);
   const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
+  const customScheduleAccess = useFeatureAccess("cronograma-personalizado", Boolean(user));
+  const diagnosisAccess = useFeatureAccess("diagnostico-capilar", Boolean(user));
+  const canUseCustomSchedule = customScheduleAccess.data?.hasAccess ?? false;
+  const canUseDiagnosis = diagnosisAccess.data?.hasAccess ?? false;
+  const checkingCustomScheduleAccess = Boolean(user) && customScheduleAccess.isLoading;
 
   useEffect(() => {
     if (!loading && !user) {
@@ -519,7 +526,7 @@ function CronogramaPage() {
   }, [loading, navigate, user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !canUseCustomSchedule) return;
     supabase
       .from("schedule_preferences")
       .select("*")
@@ -539,7 +546,7 @@ function CronogramaPage() {
             sunday: parseFocusType(data.sunday),
           });
       });
-  }, [user]);
+  }, [canUseCustomSchedule, user]);
 
   const diagnosis = useMemo(
     () => buildDiagnosis(selectedConcerns, quizAnswers),
@@ -564,6 +571,11 @@ function CronogramaPage() {
   const savePrefs = async (nextPrefs: Prefs = prefs) => {
     if (!user) {
       toast.error("Faça login para salvar sua personalização");
+      return;
+    }
+    if (!canUseCustomSchedule) {
+      toast.info("Seu plano atual nao libera a personalizacao do cronograma");
+      navigate({ to: "/assinatura" });
       return;
     }
     setSaving(true);
@@ -611,6 +623,11 @@ function CronogramaPage() {
   };
 
   const applySuggestedRoutine = () => {
+    if (!canUseCustomSchedule) {
+      setShowSettings(true);
+      toast.info("Desbloqueie a personalizacao para aplicar essa sugestao ao seu cronograma");
+      return;
+    }
     const nextPrefs: Prefs = {
       ...prefs,
       goal: diagnosis.recommendedGoal,
@@ -658,372 +675,394 @@ function CronogramaPage() {
           </div>
           <button
             onClick={() => setShowSettings((s) => !s)}
+            disabled={checkingCustomScheduleAccess}
             className="inline-flex items-center gap-2 rounded-full border border-border bg-card/50 px-4 py-2 text-sm font-bold transition-smooth hover:border-primary hover:text-primary"
           >
-            <Settings className="h-4 w-4" /> Personalizar
+            {checkingCustomScheduleAccess ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Settings className="h-4 w-4" />
+            )}{" "}
+            {canUseCustomSchedule ? "Personalizar" : "Desbloquear personalizacao"}
           </button>
         </div>
 
-        <div className="mt-8 rounded-3xl border border-primary/30 bg-gradient-card p-6 md:p-8">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-2xl">
-              <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
-                <ClipboardList className="h-3.5 w-3.5" /> Diagnóstico guiado
-              </span>
-              <h2 className="mt-4 text-2xl font-black md:text-3xl">
-                Descubra o que seu cabelo está pedindo agora
-              </h2>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                Marque os sinais que você percebe e responda ao teste capilar. A tela interpreta os
-                sintomas, explica o motivo e sugere um cronograma mais próximo do ideal para os seus
-                fios.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm">
-              <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Teste concluído
-              </div>
-              <div className="mt-1 text-2xl font-black text-gradient">
-                {answeredQuestions}/{QUIZ_QUESTIONS.length}
-              </div>
-              <div className="text-xs text-muted-foreground">perguntas respondidas</div>
-            </div>
-          </div>
-
-          <div className="mt-8">
-            <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              1. Marque o que você percebe no seu cabelo hoje
-            </label>
-            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {CONCERNS.map((concern) => {
-                const isSelected = selectedConcerns.includes(concern.key);
-                const meta = FOCUS_TYPES[concern.focus];
-                const Icon = meta.icon;
-
-                return (
-                  <button
-                    key={concern.key}
-                    type="button"
-                    onClick={() => toggleConcern(concern.key)}
-                    className={`rounded-2xl border p-4 text-left transition-smooth ${isSelected ? "border-primary bg-primary/10 shadow-glow" : "border-border bg-background/40 hover:border-primary/50"}`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div
-                        className={`inline-flex items-center gap-2 rounded-full bg-gradient-to-r ${meta.color} px-3 py-1 text-xs font-bold text-background`}
-                      >
-                        <Icon className="h-3.5 w-3.5" /> {concern.focus}
-                      </div>
-                      {isSelected && <Check className="h-4 w-4 text-primary" />}
-                    </div>
-                    <div className="mt-3 font-bold">{concern.label}</div>
-                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                      {concern.desc}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mt-8">
-            <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              2. Faça seu teste capilar rápido
-            </label>
-            <div className="mt-3 grid gap-4 xl:grid-cols-2">
-              {QUIZ_QUESTIONS.map((question) => (
-                <div
-                  key={question.key}
-                  className="rounded-2xl border border-border bg-background/40 p-4"
-                >
-                  <div className="font-bold">{question.question}</div>
-                  <p className="mt-1 text-sm text-muted-foreground">{question.helper}</p>
-                  <div className="mt-4 space-y-2">
-                    {question.options.map((option) => {
-                      const isSelected = quizAnswers[question.key] === option.key;
-
-                      return (
-                        <button
-                          key={option.key}
-                          type="button"
-                          onClick={() => answerQuiz(question.key, option.key)}
-                          className={`w-full rounded-2xl border p-3 text-left transition-smooth ${isSelected ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"}`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="font-semibold">{option.label}</div>
-                              <div className="mt-1 text-sm text-muted-foreground">
-                                {option.desc}
-                              </div>
-                            </div>
-                            {isSelected && (
-                              <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                            )}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-8 grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-            <div className="rounded-3xl border border-primary/30 bg-background/50 p-6">
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-primary shadow-glow">
-                  <WandSparkles className="h-5 w-5 text-primary-foreground" />
-                </div>
-                <div>
-                  <div className="font-bold">Sua leitura capilar</div>
-                  <div className="text-xs text-muted-foreground">
-                    Resultado pensado a partir dos sinais e respostas do teste
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-5 grid gap-3 md:grid-cols-3">
-                {diagnosis.ranking.map((focus) => (
-                  <div key={focus} className="rounded-2xl border border-border bg-card/60 p-4">
-                    <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                      {focus}
-                    </div>
-                    <div className="mt-2 text-3xl font-black text-gradient">
-                      {diagnosis.scores[focus]}
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">pontos de prioridade</div>
-                  </div>
-                ))}
-              </div>
-
-              <p className="mt-5 text-sm leading-relaxed text-foreground/90">{diagnosis.summary}</p>
-
-              <div className="mt-5 rounded-2xl border border-border bg-card/50 p-4">
-                <div className="inline-flex items-center gap-2 text-sm font-bold text-primary">
-                  <Target className="h-4 w-4" /> Objetivo sugerido
-                </div>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  O sistema recomenda focar em{" "}
-                  <strong className="text-foreground">{diagnosis.recommendedGoal}</strong> neste
-                  momento, porque esse caminho conversa melhor com os sinais que seu cabelo está
-                  mostrando.
-                </p>
-              </div>
-
-              <div className="mt-5 flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  onClick={applySuggestedRoutine}
-                  className="inline-flex items-center gap-2 rounded-full bg-gradient-primary px-6 py-2.5 text-sm font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105"
-                >
-                  <RefreshCw className="h-4 w-4" /> Aplicar sugestão ao cronograma
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowSettings(true)}
-                  className="rounded-full border border-border px-6 py-2.5 text-sm font-bold text-muted-foreground transition-smooth hover:border-primary hover:text-primary"
-                >
-                  Revisar manualmente
-                </button>
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-border bg-background/50 p-6">
-              <div className="font-bold">Dicas para chegar no cronograma ideal</div>
-              <div className="mt-1 text-sm text-muted-foreground">
-                Use estas observações como guia enquanto ajusta sua rotina.
-              </div>
-              <ul className="mt-5 space-y-3">
-                {diagnosis.highlightedTips.map((tip) => (
-                  <li key={tip} className="flex items-start gap-3 text-sm">
-                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                    <span className="leading-relaxed text-foreground/90">{tip}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-
-          <div className="mt-8 rounded-3xl border border-border bg-background/50 p-6">
-            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <FeatureAccessGuard
+          featureKey="diagnostico-capilar"
+          title="Desbloqueie o diagnostico capilar"
+          description="Esse modulo interpreta os sinais do seu cabelo e monta uma leitura guiada com sugestoes mais avancadas para a sua rotina."
+        >
+          <div className="mt-8 rounded-3xl border border-primary/30 bg-gradient-card p-6 md:p-8">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
               <div className="max-w-2xl">
                 <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
-                  <ShoppingBag className="h-3.5 w-3.5" /> Produtos indicados
+                  <ClipboardList className="h-3.5 w-3.5" /> Diagnóstico guiado
                 </span>
-                <h3 className="mt-4 text-2xl font-black">
-                  O que usar para seguir seu cronograma com mais clareza
-                </h3>
-                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                  Separei os kits que mais combinam com o seu diagnóstico atual para facilitar a
-                  escolha entre hidratação, nutrição e reconstrução.
+                <h2 className="mt-4 text-2xl font-black md:text-3xl">
+                  Descubra o que seu cabelo está pedindo agora
+                </h2>
+                <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                  Marque os sinais que você percebe e responda ao teste capilar. A tela interpreta os
+                  sintomas, explica o motivo e sugere um cronograma mais próximo do ideal para os seus
+                  fios.
                 </p>
               </div>
-              <Link
-                to="/produtos"
-                search={{ focus: undefined }}
-                className="inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-5 py-3 text-sm font-bold transition-smooth hover:border-primary hover:text-primary"
-              >
-                Ver todos os produtos <ArrowRight className="h-4 w-4" />
-              </Link>
+              <div className="rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm">
+                <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Teste concluído
+                </div>
+                <div className="mt-1 text-2xl font-black text-gradient">
+                  {answeredQuestions}/{QUIZ_QUESTIONS.length}
+                </div>
+                <div className="text-xs text-muted-foreground">perguntas respondidas</div>
+              </div>
             </div>
 
-            <div className="mt-6 grid gap-4 xl:grid-cols-3">
-              {recommendedProducts.map((product) => {
-                const meta = FOCUS_TYPES[product.focus];
-                const Icon = meta.icon;
+            <div className="mt-8">
+              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                1. Marque o que você percebe no seu cabelo hoje
+              </label>
+              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {CONCERNS.map((concern) => {
+                  const isSelected = selectedConcerns.includes(concern.key);
+                  const meta = FOCUS_TYPES[concern.focus];
+                  const Icon = meta.icon;
 
-                return (
-                  <div
-                    key={product.focus}
-                    className="rounded-3xl border border-border bg-card/60 p-5 transition-smooth hover:border-primary/50"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div
-                        className={`inline-flex items-center gap-2 rounded-full bg-gradient-to-r ${meta.color} px-3 py-1 text-xs font-bold text-background`}
-                      >
-                        <Icon className="h-3.5 w-3.5" /> {product.focus}
+                  return (
+                    <button
+                      key={concern.key}
+                      type="button"
+                      onClick={() => toggleConcern(concern.key)}
+                      className={`rounded-2xl border p-4 text-left transition-smooth ${isSelected ? "border-primary bg-primary/10 shadow-glow" : "border-border bg-background/40 hover:border-primary/50"}`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div
+                          className={`inline-flex items-center gap-2 rounded-full bg-gradient-to-r ${meta.color} px-3 py-1 text-xs font-bold text-background`}
+                        >
+                          <Icon className="h-3.5 w-3.5" /> {concern.focus}
+                        </div>
+                        {isSelected && <Check className="h-4 w-4 text-primary" />}
                       </div>
-                      <span className="text-xs font-semibold text-muted-foreground">
-                        {product.priorityLabel}
-                      </span>
+                      <div className="mt-3 font-bold">{concern.label}</div>
+                      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                        {concern.desc}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-8">
+              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                2. Faça seu teste capilar rápido
+              </label>
+              <div className="mt-3 grid gap-4 xl:grid-cols-2">
+                {QUIZ_QUESTIONS.map((question) => (
+                  <div
+                    key={question.key}
+                    className="rounded-2xl border border-border bg-background/40 p-4"
+                  >
+                    <div className="font-bold">{question.question}</div>
+                    <p className="mt-1 text-sm text-muted-foreground">{question.helper}</p>
+                    <div className="mt-4 space-y-2">
+                      {question.options.map((option) => {
+                        const isSelected = quizAnswers[question.key] === option.key;
+
+                        return (
+                          <button
+                            key={option.key}
+                            type="button"
+                            onClick={() => answerQuiz(question.key, option.key)}
+                            className={`w-full rounded-2xl border p-3 text-left transition-smooth ${isSelected ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"}`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="font-semibold">{option.label}</div>
+                                <div className="mt-1 text-sm text-muted-foreground">
+                                  {option.desc}
+                                </div>
+                              </div>
+                              {isSelected && (
+                                <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
-
-                    <div className="mt-4 text-lg font-black">{product.name}</div>
-                    <p className="mt-1 text-sm font-medium text-foreground/90">
-                      {product.subtitle}
-                    </p>
-                    <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                      {product.whenToUse}
-                    </p>
-
-                    <ul className="mt-4 space-y-2">
-                      {product.benefits.map((benefit) => (
-                        <li key={benefit} className="flex items-start gap-3 text-sm">
-                          <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                          <span className="leading-relaxed text-foreground/90">{benefit}</span>
-                        </li>
-                      ))}
-                    </ul>
-
-                    <Link
-                      to="/produtos"
-                      search={{ focus: product.focus }}
-                      className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-gradient-primary px-5 py-3 text-sm font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105"
-                    >
-                      Adicionar esse kit ao meu tratamento <ArrowRight className="h-4 w-4" />
-                    </Link>
-
-                    <Link
-                      to="/produtos"
-                      search={{ focus: product.focus }}
-                      className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-primary transition-smooth hover:gap-3"
-                    >
-                      Abrir vitrine de produtos <ArrowRight className="h-4 w-4" />
-                    </Link>
                   </div>
-                );
-              })}
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-8 grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+              <div className="rounded-3xl border border-primary/30 bg-background/50 p-6">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-primary shadow-glow">
+                    <WandSparkles className="h-5 w-5 text-primary-foreground" />
+                  </div>
+                  <div>
+                    <div className="font-bold">Sua leitura capilar</div>
+                    <div className="text-xs text-muted-foreground">
+                      Resultado pensado a partir dos sinais e respostas do teste
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-3 md:grid-cols-3">
+                  {diagnosis.ranking.map((focus) => (
+                    <div key={focus} className="rounded-2xl border border-border bg-card/60 p-4">
+                      <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                        {focus}
+                      </div>
+                      <div className="mt-2 text-3xl font-black text-gradient">
+                        {diagnosis.scores[focus]}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">pontos de prioridade</div>
+                    </div>
+                  ))}
+                </div>
+
+                <p className="mt-5 text-sm leading-relaxed text-foreground/90">
+                  {diagnosis.summary}
+                </p>
+
+                <div className="mt-5 rounded-2xl border border-border bg-card/50 p-4">
+                  <div className="inline-flex items-center gap-2 text-sm font-bold text-primary">
+                    <Target className="h-4 w-4" /> Objetivo sugerido
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    O sistema recomenda focar em{" "}
+                    <strong className="text-foreground">{diagnosis.recommendedGoal}</strong> neste
+                    momento, porque esse caminho conversa melhor com os sinais que seu cabelo está
+                    mostrando.
+                  </p>
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={applySuggestedRoutine}
+                    className="inline-flex items-center gap-2 rounded-full bg-gradient-primary px-6 py-2.5 text-sm font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105"
+                  >
+                    <RefreshCw className="h-4 w-4" /> Aplicar sugestão ao cronograma
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowSettings(true)}
+                    className="rounded-full border border-border px-6 py-2.5 text-sm font-bold text-muted-foreground transition-smooth hover:border-primary hover:text-primary"
+                  >
+                    {canUseCustomSchedule ? "Revisar manualmente" : "Desbloquear personalizacao"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-border bg-background/50 p-6">
+                <div className="font-bold">Dicas para chegar no cronograma ideal</div>
+                <div className="mt-1 text-sm text-muted-foreground">
+                  Use estas observações como guia enquanto ajusta sua rotina.
+                </div>
+                <ul className="mt-5 space-y-3">
+                  {diagnosis.highlightedTips.map((tip) => (
+                    <li key={tip} className="flex items-start gap-3 text-sm">
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                      <span className="leading-relaxed text-foreground/90">{tip}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            <div className="mt-8 rounded-3xl border border-border bg-background/50 p-6">
+              <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                <div className="max-w-2xl">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+                    <ShoppingBag className="h-3.5 w-3.5" /> Produtos indicados
+                  </span>
+                  <h3 className="mt-4 text-2xl font-black">
+                    O que usar para seguir seu cronograma com mais clareza
+                  </h3>
+                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                    Separei os kits que mais combinam com o seu diagnóstico atual para facilitar a
+                    escolha entre hidratação, nutrição e reconstrução.
+                  </p>
+                </div>
+                <Link
+                  to="/produtos"
+                  search={{ focus: undefined }}
+                  className="inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-5 py-3 text-sm font-bold transition-smooth hover:border-primary hover:text-primary"
+                >
+                  Ver todos os produtos <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
+
+              <div className="mt-6 grid gap-4 xl:grid-cols-3">
+                {recommendedProducts.map((product) => {
+                  const meta = FOCUS_TYPES[product.focus];
+                  const Icon = meta.icon;
+
+                  return (
+                    <div
+                      key={product.focus}
+                      className="rounded-3xl border border-border bg-card/60 p-5 transition-smooth hover:border-primary/50"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div
+                          className={`inline-flex items-center gap-2 rounded-full bg-gradient-to-r ${meta.color} px-3 py-1 text-xs font-bold text-background`}
+                        >
+                          <Icon className="h-3.5 w-3.5" /> {product.focus}
+                        </div>
+                        <span className="text-xs font-semibold text-muted-foreground">
+                          {product.priorityLabel}
+                        </span>
+                      </div>
+
+                      <div className="mt-4 text-lg font-black">{product.name}</div>
+                      <p className="mt-1 text-sm font-medium text-foreground/90">
+                        {product.subtitle}
+                      </p>
+                      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                        {product.whenToUse}
+                      </p>
+
+                      <ul className="mt-4 space-y-2">
+                        {product.benefits.map((benefit) => (
+                          <li key={benefit} className="flex items-start gap-3 text-sm">
+                            <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                            <span className="leading-relaxed text-foreground/90">{benefit}</span>
+                          </li>
+                        ))}
+                      </ul>
+
+                      <Link
+                        to="/produtos"
+                        search={{ focus: product.focus }}
+                        className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-gradient-primary px-5 py-3 text-sm font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105"
+                      >
+                        Adicionar esse kit ao meu tratamento <ArrowRight className="h-4 w-4" />
+                      </Link>
+
+                      <Link
+                        to="/produtos"
+                        search={{ focus: product.focus }}
+                        className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-primary transition-smooth hover:gap-3"
+                      >
+                        Abrir vitrine de produtos <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
-        </div>
+        </FeatureAccessGuard>
 
         {/* Settings panel */}
         {showSettings && (
-          <div className="mt-6 rounded-3xl bg-gradient-card border border-primary/30 p-6 md:p-8">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-primary shadow-glow">
-                <Settings className="h-5 w-5 text-primary-foreground" />
-              </div>
-              <div>
-                <div className="font-bold">Personalizar cronograma</div>
-                <div className="text-xs text-muted-foreground">
-                  Adapte os focos da semana ao seu cabelo
+          <FeatureAccessGuard
+            featureKey="cronograma-personalizado"
+            title="Desbloqueie a personalizacao do cronograma"
+            description="Ao fazer upgrade voce libera ajustes manuais por dia, salvamento do seu plano e uma experiencia mais personalizada dentro da rotina."
+          >
+            <div className="mt-6 rounded-3xl bg-gradient-card border border-primary/30 p-6 md:p-8">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-primary shadow-glow">
+                  <Settings className="h-5 w-5 text-primary-foreground" />
                 </div>
-              </div>
-            </div>
-
-            <div className="mt-6 grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  Tipo de cabelo
-                </label>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {HAIR_TYPES.map((h) => (
-                    <button
-                      key={h}
-                      onClick={() => setPrefs((p) => ({ ...p, hair_type: h }))}
-                      className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-smooth ${prefs.hair_type === h ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
-                    >
-                      {h}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  Objetivo principal
-                </label>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {GOALS.map((g) => (
-                    <button
-                      key={g}
-                      onClick={() => setPrefs((p) => ({ ...p, goal: g }))}
-                      className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-smooth ${prefs.goal === g ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
-                    >
-                      {g}
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-3 text-xs text-muted-foreground">
-                  Sugestão atual do teste:{" "}
-                  <span className="font-semibold text-foreground">{diagnosis.recommendedGoal}</span>
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Foco de cada dia
-              </label>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {DAYS.map((d) => (
-                  <div
-                    key={d.key}
-                    className="rounded-2xl border border-border bg-background/50 p-3"
-                  >
-                    <div className="text-xs font-bold text-foreground/80">{d.label}</div>
-                    <select
-                      value={prefs[d.key]}
-                      onChange={(e) => updateDayPreference(d.key, parseFocusType(e.target.value))}
-                      className="mt-1.5 w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm focus:outline-none focus:border-primary"
-                    >
-                      {focusOptions.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
+                <div>
+                  <div className="font-bold">Personalizar cronograma</div>
+                  <div className="text-xs text-muted-foreground">
+                    Adapte os focos da semana ao seu cabelo
                   </div>
-                ))}
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    Tipo de cabelo
+                  </label>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {HAIR_TYPES.map((h) => (
+                      <button
+                        key={h}
+                        onClick={() => setPrefs((p) => ({ ...p, hair_type: h }))}
+                        className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-smooth ${prefs.hair_type === h ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+                      >
+                        {h}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    Objetivo principal
+                  </label>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {GOALS.map((g) => (
+                      <button
+                        key={g}
+                        onClick={() => setPrefs((p) => ({ ...p, goal: g }))}
+                        className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-smooth ${prefs.goal === g ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Sugestão atual do teste:{" "}
+                    <span className="font-semibold text-foreground">
+                      {canUseDiagnosis ? diagnosis.recommendedGoal : "Indisponivel no seu plano"}
+                    </span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Foco de cada dia
+                </label>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {DAYS.map((d) => (
+                    <div
+                      key={d.key}
+                      className="rounded-2xl border border-border bg-background/50 p-3"
+                    >
+                      <div className="text-xs font-bold text-foreground/80">{d.label}</div>
+                      <select
+                        value={prefs[d.key]}
+                        onChange={(e) => updateDayPreference(d.key, parseFocusType(e.target.value))}
+                        className="mt-1.5 w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm focus:outline-none focus:border-primary"
+                      >
+                        {focusOptions.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-wrap gap-3">
+                <button
+                  onClick={() => savePrefs()}
+                  disabled={saving}
+                  className="inline-flex items-center gap-2 rounded-full bg-gradient-primary px-6 py-2.5 text-sm font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105 disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" /> {saving ? "Salvando..." : "Salvar personalização"}
+                </button>
+                <button
+                  onClick={() => setShowSettings(false)}
+                  className="rounded-full border border-border px-6 py-2.5 text-sm font-bold text-muted-foreground hover:text-foreground transition-smooth"
+                >
+                  Cancelar
+                </button>
               </div>
             </div>
-
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button
-                onClick={() => savePrefs()}
-                disabled={saving}
-                className="inline-flex items-center gap-2 rounded-full bg-gradient-primary px-6 py-2.5 text-sm font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105 disabled:opacity-50"
-              >
-                <Save className="h-4 w-4" /> {saving ? "Salvando..." : "Salvar personalização"}
-              </button>
-              <button
-                onClick={() => setShowSettings(false)}
-                className="rounded-full border border-border px-6 py-2.5 text-sm font-bold text-muted-foreground hover:text-foreground transition-smooth"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
+          </FeatureAccessGuard>
         )}
 
         {/* Stats */}

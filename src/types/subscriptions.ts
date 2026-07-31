@@ -82,6 +82,29 @@ export type UserSubscriptionSnapshot = {
   history: UserSubscriptionHistoryRow[];
 };
 
+export type FeatureAccessReason =
+  | "allowed"
+  | "upgrade_required"
+  | "unauthenticated"
+  | "feature_not_found"
+  | "feature_inactive"
+  | "plan_not_found";
+
+export type CurrentUserFeatureAccess = {
+  featureKey: string;
+  featureName: string | null;
+  featureDescription: string | null;
+  hasAccess: boolean;
+  currentPlanId: string | null;
+  currentPlanName: string | null;
+  currentPlanSlug: string | null;
+  subscriptionStatus: string | null;
+  recommendedPlanId: string | null;
+  recommendedPlanName: string | null;
+  recommendedPlanSlug: string | null;
+  reason: FeatureAccessReason;
+};
+
 export const EMPTY_SUBSCRIPTION_PLAN_FORM: SubscriptionPlanFormValues = {
   name: "",
   description: "",

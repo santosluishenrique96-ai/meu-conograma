@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   deleteSubscriptionFeature,
+  getCurrentUserFeatureAccess,
   getCurrentUserPlanPermissionSnapshot,
   listPlanFeatureAccess,
   listSubscriptionFeatures,
@@ -38,6 +39,15 @@ export function useCurrentUserPlanPermissions(userId?: string) {
     queryKey: ["user-plan-permissions", userId],
     queryFn: () => getCurrentUserPlanPermissionSnapshot(userId!),
     enabled: Boolean(userId),
+    staleTime: 60_000,
+  });
+}
+
+export function useFeatureAccess(featureKey?: string, enabled = true) {
+  return useQuery({
+    queryKey: ["feature-access", featureKey],
+    queryFn: () => getCurrentUserFeatureAccess(featureKey!),
+    enabled: Boolean(featureKey) && enabled,
     staleTime: 60_000,
   });
 }
