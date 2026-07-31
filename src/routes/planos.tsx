@@ -8,6 +8,7 @@ import {
   Crown,
   Gem,
   Heart,
+  KeyRound,
   Loader2,
   Pencil,
   Plus,
@@ -21,26 +22,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { SiteHeader } from "@/components/SiteHeader";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -52,6 +35,23 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import {
   Table,
   TableBody,
   TableCell,
@@ -59,11 +59,25 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
-import { useStoreAdmin } from "@/hooks/use-store-admin";
-import { useAdminSubscriptionPlans, useSubscriptionPlanAdminMutations } from "@/hooks/use-subscription-plans";
-import type { SubscriptionPlanRow, SubscriptionPlanFormValues, SubscriptionPlanIcon } from "@/types/subscriptions";
 import {
+  useAdminPlanFeatureAccess,
+  useAdminSubscriptionFeatures,
+  useSubscriptionPermissionAdminMutations,
+} from "@/hooks/use-subscription-permissions";
+import { useSubscriptionPlanAdminMutations, useAdminSubscriptionPlans } from "@/hooks/use-subscription-plans";
+import { useStoreAdmin } from "@/hooks/use-store-admin";
+import { buildPlanFeatureAccessMap } from "@/services/subscription-permissions";
+import type {
+  SubscriptionFeatureFormValues,
+  SubscriptionFeatureRow,
+  SubscriptionPlanFormValues,
+  SubscriptionPlanIcon,
+  SubscriptionPlanRow,
+} from "@/types/subscriptions";
+import {
+  EMPTY_SUBSCRIPTION_FEATURE_FORM,
   EMPTY_SUBSCRIPTION_PLAN_FORM,
   SUBSCRIPTION_PLAN_ICON_OPTIONS,
 } from "@/types/subscriptions";
@@ -74,7 +88,7 @@ export const Route = createFileRoute("/planos")({
       { title: "Planos — Administração" },
       {
         name: "description",
-        content: "Gerencie os planos de assinatura do Meu Cronograma.",
+        content: "Gerencie os planos, recursos e permissoes do Meu Cronograma.",
       },
     ],
   }),
@@ -122,16 +136,43 @@ function getPlanFormValues(plan?: SubscriptionPlanRow): SubscriptionPlanFormValu
   };
 }
 
+function getFeatureFormValues(feature?: SubscriptionFeatureRow): SubscriptionFeatureFormValues {
+  if (!feature) return { ...EMPTY_SUBSCRIPTION_FEATURE_FORM };
+
+  return {
+    id: feature.id,
+    feature_key: feature.feature_key,
+    name: feature.name,
+    description: feature.description,
+    category: feature.category,
+    display_order: feature.display_order,
+    is_active: feature.is_active,
+  };
+}
+
 function PlanosPage() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { isAdmin, loading: adminLoading } = useStoreAdmin();
-  const plansQuery = useAdminSubscriptionPlans(Boolean(user));
-  const { savePlan, deletePlan, togglePlanStatus, updatePlanOrder } = useSubscriptionPlanAdminMutations();
 
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<SubscriptionPlanRow | null>(null);
-  const [form, setForm] = useState<SubscriptionPlanFormValues>({ ...EMPTY_SUBSCRIPTION_PLAN_FORM });
+  const plansQuery = useAdminSubscriptionPlans(Boolean(user));
+  const featuresQuery = useAdminSubscriptionFeatures(Boolean(user));
+  const accessQuery = useAdminPlanFeatureAccess(Boolean(user));
+
+  const planMutations = useSubscriptionPlanAdminMutations();
+  const permissionMutations = useSubscriptionPermissionAdminMutations();
+
+  const [planDialogOpen, setPlanDialogOpen] = useState(false);
+  const [planDeleteTarget, setPlanDeleteTarget] = useState<SubscriptionPlanRow | null>(null);
+  const [planForm, setPlanForm] = useState<SubscriptionPlanFormValues>({
+    ...EMPTY_SUBSCRIPTION_PLAN_FORM,
+  });
+
+  const [featureDialogOpen, setFeatureDialogOpen] = useState(false);
+  const [featureDeleteTarget, setFeatureDeleteTarget] = useState<SubscriptionFeatureRow | null>(null);
+  const [featureForm, setFeatureForm] = useState<SubscriptionFeatureFormValues>({
+    ...EMPTY_SUBSCRIPTION_FEATURE_FORM,
+  });
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -140,60 +181,97 @@ function PlanosPage() {
   }, [authLoading, navigate, user]);
 
   const plans = useMemo(() => plansQuery.data ?? [], [plansQuery.data]);
+  const features = useMemo(() => featuresQuery.data ?? [], [featuresQuery.data]);
+  const featureAccessMap = useMemo(
+    () => buildPlanFeatureAccessMap(accessQuery.data ?? []),
+    [accessQuery.data],
+  );
+
   const activePlans = useMemo(() => plans.filter((plan) => plan.is_active).length, [plans]);
   const inactivePlans = plans.length - activePlans;
+  const activeFeatures = useMemo(
+    () => features.filter((feature) => feature.is_active).length,
+    [features],
+  );
 
-  const openCreateDialog = () => {
+  const openCreatePlanDialog = () => {
     const nextDisplayOrder =
       plans.length > 0 ? Math.max(...plans.map((plan) => plan.display_order)) + 1 : 1;
 
-    setForm({
+    setPlanForm({
       ...EMPTY_SUBSCRIPTION_PLAN_FORM,
       display_order: nextDisplayOrder,
     });
-    setDialogOpen(true);
+    setPlanDialogOpen(true);
   };
 
-  const openEditDialog = (plan: SubscriptionPlanRow) => {
-    setForm(getPlanFormValues(plan));
-    setDialogOpen(true);
+  const openEditPlanDialog = (plan: SubscriptionPlanRow) => {
+    setPlanForm(getPlanFormValues(plan));
+    setPlanDialogOpen(true);
   };
 
-  const handleChange = <K extends keyof SubscriptionPlanFormValues>(
+  const openCreateFeatureDialog = () => {
+    const nextDisplayOrder =
+      features.length > 0 ? Math.max(...features.map((feature) => feature.display_order)) + 1 : 1;
+
+    setFeatureForm({
+      ...EMPTY_SUBSCRIPTION_FEATURE_FORM,
+      display_order: nextDisplayOrder,
+    });
+    setFeatureDialogOpen(true);
+  };
+
+  const openEditFeatureDialog = (feature: SubscriptionFeatureRow) => {
+    setFeatureForm(getFeatureFormValues(feature));
+    setFeatureDialogOpen(true);
+  };
+
+  const handlePlanChange = <K extends keyof SubscriptionPlanFormValues>(
     field: K,
     value: SubscriptionPlanFormValues[K],
   ) => {
-    setForm((current) => ({ ...current, [field]: value }));
+    setPlanForm((current) => ({ ...current, [field]: value }));
   };
 
-  const handleSave = async () => {
+  const handleFeatureChange = <K extends keyof SubscriptionFeatureFormValues>(
+    field: K,
+    value: SubscriptionFeatureFormValues[K],
+  ) => {
+    setFeatureForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleSavePlan = async () => {
     if (!user) return;
 
-    if (!form.name.trim()) {
+    if (!planForm.name.trim()) {
       toast.error("Informe o nome do plano");
       return;
     }
 
-    if (!form.button_text.trim()) {
+    if (!planForm.button_text.trim()) {
       toast.error("Informe o texto do botao");
       return;
     }
 
-    if (form.monthly_price < 0 || form.annual_price < 0 || (form.promotional_price ?? 0) < 0) {
+    if (
+      planForm.monthly_price < 0 ||
+      planForm.annual_price < 0 ||
+      (planForm.promotional_price ?? 0) < 0
+    ) {
       toast.error("Os valores do plano nao podem ser negativos");
       return;
     }
 
-    if (form.free_trial_days < 0) {
+    if (planForm.free_trial_days < 0) {
       toast.error("Os dias de teste devem ser zero ou mais");
       return;
     }
 
     try {
-      await savePlan.mutateAsync({ plan: form, userId: user.id });
-      toast.success(form.id ? "Plano atualizado com sucesso" : "Plano criado com sucesso");
-      setDialogOpen(false);
-      setForm({ ...EMPTY_SUBSCRIPTION_PLAN_FORM });
+      await planMutations.savePlan.mutateAsync({ plan: planForm, userId: user.id });
+      toast.success(planForm.id ? "Plano atualizado com sucesso" : "Plano criado com sucesso");
+      setPlanDialogOpen(false);
+      setPlanForm({ ...EMPTY_SUBSCRIPTION_PLAN_FORM });
     } catch (error) {
       const message = (error as { message?: string })?.message ?? "";
       if (message.toLowerCase().includes("duplicate")) {
@@ -204,23 +282,27 @@ function PlanosPage() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
+  const handleDeletePlan = async () => {
+    if (!planDeleteTarget) return;
 
     try {
-      await deletePlan.mutateAsync(deleteTarget.id);
+      await planMutations.deletePlan.mutateAsync(planDeleteTarget.id);
       toast.success("Plano excluido com sucesso");
-      setDeleteTarget(null);
+      setPlanDeleteTarget(null);
     } catch {
       toast.error("Nao foi possivel excluir o plano");
     }
   };
 
-  const handleToggleStatus = async (plan: SubscriptionPlanRow, isActive: boolean) => {
+  const handleTogglePlanStatus = async (plan: SubscriptionPlanRow, isActive: boolean) => {
     if (!user) return;
 
     try {
-      await togglePlanStatus.mutateAsync({ planId: plan.id, isActive, userId: user.id });
+      await planMutations.togglePlanStatus.mutateAsync({
+        planId: plan.id,
+        isActive,
+        userId: user.id,
+      });
       toast.success(isActive ? "Plano ativado" : "Plano inativado");
     } catch {
       toast.error("Nao foi possivel atualizar o status do plano");
@@ -237,12 +319,12 @@ function PlanosPage() {
     if (index === -1 || !targetPlan) return;
 
     try {
-      await updatePlanOrder.mutateAsync({
+      await planMutations.updatePlanOrder.mutateAsync({
         planId: plan.id,
         displayOrder: targetPlan.display_order,
         userId: user.id,
       });
-      await updatePlanOrder.mutateAsync({
+      await planMutations.updatePlanOrder.mutateAsync({
         planId: targetPlan.id,
         displayOrder: plan.display_order,
         userId: user.id,
@@ -250,6 +332,69 @@ function PlanosPage() {
       toast.success("Ordem dos planos atualizada");
     } catch {
       toast.error("Nao foi possivel alterar a ordem dos planos");
+    }
+  };
+
+  const handleSaveFeature = async () => {
+    if (!user) return;
+
+    if (!featureForm.name.trim()) {
+      toast.error("Informe o nome do recurso");
+      return;
+    }
+
+    if (!featureForm.category.trim()) {
+      toast.error("Informe a categoria do recurso");
+      return;
+    }
+
+    try {
+      await permissionMutations.saveFeature.mutateAsync({
+        feature: featureForm,
+        userId: user.id,
+      });
+      toast.success(featureForm.id ? "Recurso atualizado com sucesso" : "Recurso criado com sucesso");
+      setFeatureDialogOpen(false);
+      setFeatureForm({ ...EMPTY_SUBSCRIPTION_FEATURE_FORM });
+    } catch (error) {
+      const message = (error as { message?: string })?.message ?? "";
+      if (message.toLowerCase().includes("duplicate")) {
+        toast.error("Ja existe um recurso com essa chave");
+      } else {
+        toast.error("Nao foi possivel salvar o recurso agora");
+      }
+    }
+  };
+
+  const handleDeleteFeature = async () => {
+    if (!featureDeleteTarget) return;
+
+    try {
+      await permissionMutations.deleteFeature.mutateAsync(featureDeleteTarget.id);
+      toast.success("Recurso excluido com sucesso");
+      setFeatureDeleteTarget(null);
+    } catch {
+      toast.error("Nao foi possivel excluir o recurso");
+    }
+  };
+
+  const handleTogglePlanFeature = async (
+    planId: string,
+    featureId: string,
+    isEnabled: boolean,
+  ) => {
+    if (!user) return;
+
+    try {
+      await permissionMutations.togglePlanFeature.mutateAsync({
+        planId,
+        featureId,
+        isEnabled,
+        userId: user.id,
+      });
+      toast.success(isEnabled ? "Permissao liberada" : "Permissao bloqueada");
+    } catch {
+      toast.error("Nao foi possivel atualizar essa permissao");
     }
   };
 
@@ -310,8 +455,8 @@ function PlanosPage() {
               Gerenciar <span className="text-gradient">Planos</span>
             </h1>
             <p className="mt-3 text-muted-foreground">
-              Cadastre, edite, ative, inative e organize os planos do SaaS sem fixar valores no
-              codigo.
+              Controle os planos do SaaS e as permissoes individuais de cada recurso sem fixar
+              regras no codigo.
             </p>
           </div>
 
@@ -323,13 +468,17 @@ function PlanosPage() {
             >
               <ArrowLeft className="h-4 w-4" /> Voltar para produtos
             </Link>
-            <Button type="button" onClick={openCreateDialog} className="rounded-full px-6 py-3 font-bold">
+            <Button
+              type="button"
+              onClick={openCreatePlanDialog}
+              className="rounded-full px-6 py-3 font-bold"
+            >
               <Plus className="h-4 w-4" /> Novo plano
             </Button>
           </div>
         </div>
 
-        <div className="mt-8 grid gap-4 md:grid-cols-3">
+        <div className="mt-8 grid gap-4 md:grid-cols-4">
           <div className="rounded-3xl border border-border bg-gradient-card p-5">
             <div className="text-sm text-muted-foreground">Total de planos</div>
             <div className="mt-2 text-3xl font-black">{plans.length}</div>
@@ -342,9 +491,22 @@ function PlanosPage() {
             <div className="text-sm text-muted-foreground">Planos inativos</div>
             <div className="mt-2 text-3xl font-black">{inactivePlans}</div>
           </div>
+          <div className="rounded-3xl border border-border bg-gradient-card p-5">
+            <div className="text-sm text-muted-foreground">Recursos ativos</div>
+            <div className="mt-2 text-3xl font-black">{activeFeatures}</div>
+          </div>
         </div>
 
-        <div className="mt-8 rounded-3xl border border-border bg-gradient-card p-4 md:p-6">
+        <section className="mt-8 rounded-3xl border border-border bg-gradient-card p-4 md:p-6">
+          <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="max-w-2xl">
+              <h2 className="text-2xl font-black">Cadastro de planos</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Valores, textos, ordem e status continuam totalmente controlados pelo banco.
+              </p>
+            </div>
+          </div>
+
           {plansQuery.isLoading ? (
             <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" /> Carregando planos...
@@ -355,7 +517,7 @@ function PlanosPage() {
               <p className="mt-3 text-sm text-muted-foreground">
                 Crie o primeiro plano para preparar a area de assinaturas do SaaS.
               </p>
-              <Button type="button" onClick={openCreateDialog} className="mt-6 rounded-full">
+              <Button type="button" onClick={openCreatePlanDialog} className="mt-6 rounded-full">
                 <Plus className="h-4 w-4" /> Criar primeiro plano
               </Button>
             </div>
@@ -385,13 +547,18 @@ function PlanosPage() {
                         <div className="flex items-start gap-3">
                           <div
                             className="mt-1 inline-flex h-11 w-11 items-center justify-center rounded-2xl border"
-                            style={{ backgroundColor: `${plan.color}20`, borderColor: `${plan.color}66` }}
+                            style={{
+                              backgroundColor: `${plan.color}20`,
+                              borderColor: `${plan.color}66`,
+                            }}
                           >
                             <Icon className="h-5 w-5" style={{ color: plan.color }} />
                           </div>
                           <div className="space-y-1">
                             <div className="font-bold">{plan.name}</div>
-                            <p className="max-w-xs text-xs text-muted-foreground">{plan.description}</p>
+                            <p className="max-w-xs text-xs text-muted-foreground">
+                              {plan.description}
+                            </p>
                             <div className="flex flex-wrap gap-2">
                               {plan.badge && <Badge variant="secondary">{plan.badge}</Badge>}
                               <Badge variant={plan.is_active ? "default" : "outline"}>
@@ -413,8 +580,8 @@ function PlanosPage() {
                         <div className="flex items-center gap-3">
                           <Switch
                             checked={plan.is_active}
-                            onCheckedChange={(checked) => void handleToggleStatus(plan, checked)}
-                            disabled={togglePlanStatus.isPending}
+                            onCheckedChange={(checked) => void handleTogglePlanStatus(plan, checked)}
+                            disabled={planMutations.togglePlanStatus.isPending}
                           />
                           <span className="text-sm text-muted-foreground">
                             {plan.is_active ? "Ativo" : "Inativo"}
@@ -430,7 +597,7 @@ function PlanosPage() {
                               variant="outline"
                               size="icon"
                               className="h-8 w-8"
-                              disabled={index === 0 || updatePlanOrder.isPending}
+                              disabled={index === 0 || planMutations.updatePlanOrder.isPending}
                               onClick={() => void movePlan(plan, "up")}
                             >
                               <ArrowUp className="h-4 w-4" />
@@ -440,7 +607,9 @@ function PlanosPage() {
                               variant="outline"
                               size="icon"
                               className="h-8 w-8"
-                              disabled={index === plans.length - 1 || updatePlanOrder.isPending}
+                              disabled={
+                                index === plans.length - 1 || planMutations.updatePlanOrder.isPending
+                              }
                               onClick={() => void movePlan(plan, "down")}
                             >
                               <ArrowDown className="h-4 w-4" />
@@ -450,7 +619,12 @@ function PlanosPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex justify-end gap-2">
-                          <Button type="button" variant="outline" size="sm" onClick={() => openEditDialog(plan)}>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEditPlanDialog(plan)}
+                          >
                             <Pencil className="h-4 w-4" /> Editar
                           </Button>
                           <Button
@@ -458,7 +632,7 @@ function PlanosPage() {
                             variant="outline"
                             size="sm"
                             className="text-destructive hover:text-destructive"
-                            onClick={() => setDeleteTarget(plan)}
+                            onClick={() => setPlanDeleteTarget(plan)}
                           >
                             <Trash2 className="h-4 w-4" /> Excluir
                           </Button>
@@ -470,21 +644,140 @@ function PlanosPage() {
               </TableBody>
             </Table>
           )}
-        </div>
+        </section>
+
+        <section className="mt-8 rounded-3xl border border-border bg-gradient-card p-4 md:p-6">
+          <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+            <div className="max-w-3xl">
+              <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+                <KeyRound className="h-3.5 w-3.5" /> Permissoes por plano
+              </span>
+              <h2 className="mt-4 text-3xl font-black">Recursos e liberacoes</h2>
+              <p className="mt-3 text-sm text-muted-foreground">
+                Cada recurso fica salvo no banco e pode ser habilitado ou bloqueado para qualquer
+                plano sem alterar funcionalidades existentes.
+              </p>
+            </div>
+            <Button
+              type="button"
+              onClick={openCreateFeatureDialog}
+              className="rounded-full px-6 py-3 font-bold"
+            >
+              <Plus className="h-4 w-4" /> Novo recurso
+            </Button>
+          </div>
+
+          <div className="mt-6 rounded-3xl border border-border bg-background/40 p-4">
+            {featuresQuery.isLoading || accessQuery.isLoading || plansQuery.isLoading ? (
+              <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" /> Carregando matriz de permissoes...
+              </div>
+            ) : features.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-border p-12 text-center">
+                <h3 className="text-2xl font-black">Nenhum recurso cadastrado</h3>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Crie um recurso para comecar a controlar o que cada plano pode acessar.
+                </p>
+                <Button type="button" onClick={openCreateFeatureDialog} className="mt-6 rounded-full">
+                  <Plus className="h-4 w-4" /> Criar primeiro recurso
+                </Button>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Recurso</TableHead>
+                    <TableHead>Categoria</TableHead>
+                    <TableHead>Status</TableHead>
+                    {plans.map((plan) => (
+                      <TableHead key={plan.id} className="min-w-[140px]">
+                        <div className="space-y-1">
+                          <div className="font-bold text-foreground">{plan.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {plan.is_active ? "Plano ativo" : "Plano inativo"}
+                          </div>
+                        </div>
+                      </TableHead>
+                    ))}
+                    <TableHead className="text-right">Acoes</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {features.map((feature) => (
+                    <TableRow key={feature.id}>
+                      <TableCell>
+                        <div className="space-y-1">
+                          <div className="font-bold">{feature.name}</div>
+                          <div className="text-xs text-muted-foreground">{feature.description}</div>
+                          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                            {feature.feature_key}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>{feature.category}</TableCell>
+                      <TableCell>
+                        <Badge variant={feature.is_active ? "default" : "outline"}>
+                          {feature.is_active ? "Ativo" : "Inativo"}
+                        </Badge>
+                      </TableCell>
+                      {plans.map((plan) => (
+                        <TableCell key={`${plan.id}-${feature.id}`}>
+                          <div className="flex items-center gap-3">
+                            <Switch
+                              checked={Boolean(featureAccessMap[plan.id]?.[feature.id])}
+                              onCheckedChange={(checked) =>
+                                void handleTogglePlanFeature(plan.id, feature.id, checked)
+                              }
+                              disabled={permissionMutations.togglePlanFeature.isPending}
+                            />
+                            <span className="text-xs text-muted-foreground">
+                              {featureAccessMap[plan.id]?.[feature.id] ? "Liberado" : "Bloqueado"}
+                            </span>
+                          </div>
+                        </TableCell>
+                      ))}
+                      <TableCell>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEditFeatureDialog(feature)}
+                          >
+                            <Pencil className="h-4 w-4" /> Editar
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => setFeatureDeleteTarget(feature)}
+                          >
+                            <Trash2 className="h-4 w-4" /> Excluir
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+        </section>
       </div>
 
       <Dialog
-        open={dialogOpen}
+        open={planDialogOpen}
         onOpenChange={(open) => {
-          setDialogOpen(open);
+          setPlanDialogOpen(open);
           if (!open) {
-            setForm({ ...EMPTY_SUBSCRIPTION_PLAN_FORM });
+            setPlanForm({ ...EMPTY_SUBSCRIPTION_PLAN_FORM });
           }
         }}
       >
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{form.id ? "Editar plano" : "Novo plano"}</DialogTitle>
+            <DialogTitle>{planForm.id ? "Editar plano" : "Novo plano"}</DialogTitle>
             <DialogDescription>
               Gerencie todos os dados do plano sem fixar valores no codigo da aplicacao.
             </DialogDescription>
@@ -497,8 +790,8 @@ function PlanosPage() {
                   Nome
                 </label>
                 <Input
-                  value={form.name}
-                  onChange={(event) => handleChange("name", event.target.value)}
+                  value={planForm.name}
+                  onChange={(event) => handlePlanChange("name", event.target.value)}
                   placeholder="Ex: Premium"
                 />
               </div>
@@ -507,8 +800,8 @@ function PlanosPage() {
                   Texto do botao
                 </label>
                 <Input
-                  value={form.button_text}
-                  onChange={(event) => handleChange("button_text", event.target.value)}
+                  value={planForm.button_text}
+                  onChange={(event) => handlePlanChange("button_text", event.target.value)}
                   placeholder="Ex: Assinar agora"
                 />
               </div>
@@ -520,8 +813,8 @@ function PlanosPage() {
               </label>
               <Textarea
                 rows={4}
-                value={form.description}
-                onChange={(event) => handleChange("description", event.target.value)}
+                value={planForm.description}
+                onChange={(event) => handlePlanChange("description", event.target.value)}
                 placeholder="Descreva rapidamente para quem esse plano foi pensado."
               />
             </div>
@@ -535,8 +828,10 @@ function PlanosPage() {
                   type="number"
                   min="0"
                   step="0.01"
-                  value={form.monthly_price}
-                  onChange={(event) => handleChange("monthly_price", Number(event.target.value || 0))}
+                  value={planForm.monthly_price}
+                  onChange={(event) =>
+                    handlePlanChange("monthly_price", Number(event.target.value || 0))
+                  }
                 />
               </div>
               <div className="space-y-2">
@@ -547,8 +842,10 @@ function PlanosPage() {
                   type="number"
                   min="0"
                   step="0.01"
-                  value={form.annual_price}
-                  onChange={(event) => handleChange("annual_price", Number(event.target.value || 0))}
+                  value={planForm.annual_price}
+                  onChange={(event) =>
+                    handlePlanChange("annual_price", Number(event.target.value || 0))
+                  }
                 />
               </div>
               <div className="space-y-2">
@@ -559,9 +856,9 @@ function PlanosPage() {
                   type="number"
                   min="0"
                   step="0.01"
-                  value={form.promotional_price ?? ""}
+                  value={planForm.promotional_price ?? ""}
                   onChange={(event) =>
-                    handleChange(
+                    handlePlanChange(
                       "promotional_price",
                       event.target.value === "" ? null : Number(event.target.value),
                     )
@@ -579,9 +876,9 @@ function PlanosPage() {
                   type="number"
                   min="0"
                   step="1"
-                  value={form.free_trial_days}
+                  value={planForm.free_trial_days}
                   onChange={(event) =>
-                    handleChange("free_trial_days", Number(event.target.value || 0))
+                    handlePlanChange("free_trial_days", Number(event.target.value || 0))
                   }
                 />
               </div>
@@ -593,8 +890,10 @@ function PlanosPage() {
                   type="number"
                   min="0"
                   step="1"
-                  value={form.display_order}
-                  onChange={(event) => handleChange("display_order", Number(event.target.value || 0))}
+                  value={planForm.display_order}
+                  onChange={(event) =>
+                    handlePlanChange("display_order", Number(event.target.value || 0))
+                  }
                 />
               </div>
               <div className="space-y-2">
@@ -602,8 +901,8 @@ function PlanosPage() {
                   Cor
                 </label>
                 <Input
-                  value={form.color}
-                  onChange={(event) => handleChange("color", event.target.value)}
+                  value={planForm.color}
+                  onChange={(event) => handlePlanChange("color", event.target.value)}
                   placeholder="#8B5CF6"
                 />
               </div>
@@ -612,8 +911,8 @@ function PlanosPage() {
                   Badge
                 </label>
                 <Input
-                  value={form.badge}
-                  onChange={(event) => handleChange("badge", event.target.value)}
+                  value={planForm.badge}
+                  onChange={(event) => handlePlanChange("badge", event.target.value)}
                   placeholder="Ex: Mais popular"
                 />
               </div>
@@ -625,8 +924,8 @@ function PlanosPage() {
                   Icone
                 </label>
                 <Select
-                  value={form.icon}
-                  onValueChange={(value) => handleChange("icon", value as SubscriptionPlanIcon)}
+                  value={planForm.icon}
+                  onValueChange={(value) => handlePlanChange("icon", value as SubscriptionPlanIcon)}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Selecione um icone" />
@@ -646,11 +945,11 @@ function PlanosPage() {
                 </label>
                 <div className="flex h-9 items-center justify-between rounded-md border border-input px-3">
                   <span className="text-sm text-muted-foreground">
-                    {form.is_active ? "Plano ativo" : "Plano inativo"}
+                    {planForm.is_active ? "Plano ativo" : "Plano inativo"}
                   </span>
                   <Switch
-                    checked={form.is_active}
-                    onCheckedChange={(checked) => handleChange("is_active", checked)}
+                    checked={planForm.is_active}
+                    onCheckedChange={(checked) => handlePlanChange("is_active", checked)}
                   />
                 </div>
               </div>
@@ -661,22 +960,25 @@ function PlanosPage() {
               <div className="mt-4 flex items-start gap-4">
                 <div
                   className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border"
-                  style={{ backgroundColor: `${form.color}20`, borderColor: `${form.color}66` }}
+                  style={{
+                    backgroundColor: `${planForm.color}20`,
+                    borderColor: `${planForm.color}66`,
+                  }}
                 >
                   {(() => {
-                    const Icon = planIconMap[form.icon];
-                    return <Icon className="h-5 w-5" style={{ color: form.color }} />;
+                    const Icon = planIconMap[planForm.icon];
+                    return <Icon className="h-5 w-5" style={{ color: planForm.color }} />;
                   })()}
                 </div>
                 <div className="space-y-2">
-                  <div className="text-xl font-black">{form.name || "Nome do plano"}</div>
+                  <div className="text-xl font-black">{planForm.name || "Nome do plano"}</div>
                   <p className="max-w-xl text-sm text-muted-foreground">
-                    {form.description || "A descricao do plano aparecera aqui na previa."}
+                    {planForm.description || "A descricao do plano aparecera aqui na previa."}
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {form.badge && <Badge variant="secondary">{form.badge}</Badge>}
-                    <Badge variant={form.is_active ? "default" : "outline"}>
-                      {form.button_text || "Escolher plano"}
+                    {planForm.badge && <Badge variant="secondary">{planForm.badge}</Badge>}
+                    <Badge variant={planForm.is_active ? "default" : "outline"}>
+                      {planForm.button_text || "Escolher plano"}
                     </Badge>
                   </div>
                 </div>
@@ -685,11 +987,15 @@ function PlanosPage() {
           </div>
 
           <DialogFooter className="gap-2">
-            <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
+            <Button type="button" variant="outline" onClick={() => setPlanDialogOpen(false)}>
               Cancelar
             </Button>
-            <Button type="button" onClick={() => void handleSave()} disabled={savePlan.isPending}>
-              {savePlan.isPending ? (
+            <Button
+              type="button"
+              onClick={() => void handleSavePlan()}
+              disabled={planMutations.savePlan.isPending}
+            >
+              {planMutations.savePlan.isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" /> Salvando...
                 </>
@@ -703,29 +1009,183 @@ function PlanosPage() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+      <Dialog
+        open={featureDialogOpen}
+        onOpenChange={(open) => {
+          setFeatureDialogOpen(open);
+          if (!open) {
+            setFeatureForm({ ...EMPTY_SUBSCRIPTION_FEATURE_FORM });
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{featureForm.id ? "Editar recurso" : "Novo recurso"}</DialogTitle>
+            <DialogDescription>
+              Cadastre os recursos que poderao ser liberados ou bloqueados por plano.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-6 py-2">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Nome
+                </label>
+                <Input
+                  value={featureForm.name}
+                  onChange={(event) => handleFeatureChange("name", event.target.value)}
+                  placeholder="Ex: Conteudo Premium"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Chave tecnica
+                </label>
+                <Input
+                  value={featureForm.feature_key}
+                  onChange={(event) => handleFeatureChange("feature_key", event.target.value)}
+                  placeholder="Ex: conteudo-premium"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Descricao
+              </label>
+              <Textarea
+                rows={4}
+                value={featureForm.description}
+                onChange={(event) => handleFeatureChange("description", event.target.value)}
+                placeholder="Explique o que esse recurso representa dentro do produto."
+              />
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Categoria
+                </label>
+                <Input
+                  value={featureForm.category}
+                  onChange={(event) => handleFeatureChange("category", event.target.value)}
+                  placeholder="Ex: IA"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Ordem
+                </label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={featureForm.display_order}
+                  onChange={(event) =>
+                    handleFeatureChange("display_order", Number(event.target.value || 0))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Status
+                </label>
+                <div className="flex h-9 items-center justify-between rounded-md border border-input px-3">
+                  <span className="text-sm text-muted-foreground">
+                    {featureForm.is_active ? "Recurso ativo" : "Recurso inativo"}
+                  </span>
+                  <Switch
+                    checked={featureForm.is_active}
+                    onCheckedChange={(checked) => handleFeatureChange("is_active", checked)}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="outline" onClick={() => setFeatureDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void handleSaveFeature()}
+              disabled={permissionMutations.saveFeature.isPending}
+            >
+              {permissionMutations.saveFeature.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Salvando...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4" /> Salvar recurso
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={Boolean(planDeleteTarget)}
+        onOpenChange={(open) => !open && setPlanDeleteTarget(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir plano?</AlertDialogTitle>
             <AlertDialogDescription>
-              {deleteTarget
-                ? `Voce esta prestes a remover o plano "${deleteTarget.name}". Essa acao nao pode ser desfeita.`
+              {planDeleteTarget
+                ? `Voce esta prestes a remover o plano "${planDeleteTarget.name}". Essa acao nao pode ser desfeita.`
                 : "Confirme a exclusao do plano selecionado."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => void handleDelete()}
+              onClick={() => void handleDeletePlan()}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {deletePlan.isPending ? (
+              {planMutations.deletePlan.isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" /> Excluindo...
                 </>
               ) : (
                 <>
                   <Trash2 className="h-4 w-4" /> Excluir plano
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={Boolean(featureDeleteTarget)}
+        onOpenChange={(open) => !open && setFeatureDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir recurso?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {featureDeleteTarget
+                ? `Voce esta prestes a remover o recurso "${featureDeleteTarget.name}". As permissoes ligadas a ele tambem serao apagadas.`
+                : "Confirme a exclusao do recurso selecionado."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void handleDeleteFeature()}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {permissionMutations.deleteFeature.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Excluindo...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4" /> Excluir recurso
                 </>
               )}
             </AlertDialogAction>

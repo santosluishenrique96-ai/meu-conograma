@@ -119,6 +119,39 @@ export type Database = {
         };
         Relationships: [];
       };
+      plan_feature_access: {
+        Row: {
+          created_at: string;
+          created_by: string | null;
+          feature_id: string;
+          id: string;
+          is_enabled: boolean;
+          plan_id: string;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: string | null;
+          feature_id: string;
+          id?: string;
+          is_enabled?: boolean;
+          plan_id: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: string | null;
+          feature_id?: string;
+          id?: string;
+          is_enabled?: boolean;
+          plan_id?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [];
+      };
       subscription_plans: {
         Row: {
           annual_price: number;
@@ -177,6 +210,48 @@ export type Database = {
           name?: string;
           promotional_price?: number | null;
           slug?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [];
+      };
+      subscription_features: {
+        Row: {
+          category: string;
+          created_at: string;
+          created_by: string | null;
+          description: string;
+          display_order: number;
+          feature_key: string;
+          id: string;
+          is_active: boolean;
+          name: string;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          category?: string;
+          created_at?: string;
+          created_by?: string | null;
+          description?: string;
+          display_order?: number;
+          feature_key: string;
+          id?: string;
+          is_active?: boolean;
+          name: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          category?: string;
+          created_at?: string;
+          created_by?: string | null;
+          description?: string;
+          display_order?: number;
+          feature_key?: string;
+          id?: string;
+          is_active?: boolean;
+          name?: string;
           updated_at?: string;
           updated_by?: string | null;
         };

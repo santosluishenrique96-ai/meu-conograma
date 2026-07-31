@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import type {
+  SubscriptionPlanCatalogItem,
   SubscriptionPlanFormValues,
   SubscriptionPlanInsert,
   SubscriptionPlanRow,
@@ -144,4 +145,67 @@ export async function getCurrentUserSubscription(userId: string) {
   }
 
   return data as UserSubscriptionRow | null;
+}
+
+export async function listPublicPlanCatalog() {
+  const { data: plans, error: plansError } = await supabase
+    .from("subscription_plans")
+    .select("*")
+    .eq("is_active", true)
+    .order("display_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (plansError) {
+    throw plansError;
+  }
+
+  const activePlans = (plans ?? []) as SubscriptionPlanRow[];
+  if (!activePlans.length) return [] as SubscriptionPlanCatalogItem[];
+
+  const planIds = activePlans.map((plan) => plan.id);
+
+  const { data: featureAccessRows, error: featureAccessError } = await supabase
+    .from("plan_feature_access")
+    .select("plan_id, feature_id, is_enabled")
+    .in("plan_id", planIds)
+    .eq("is_enabled", true);
+
+  if (featureAccessError) {
+    throw featureAccessError;
+  }
+
+  const featureIds = [...new Set((featureAccessRows ?? []).map((row) => row.feature_id))];
+
+  const { data: features, error: featuresError } = featureIds.length
+    ? await supabase
+        .from("subscription_features")
+        .select("id, name, description, category, display_order, is_active")
+        .in("id", featureIds)
+        .eq("is_active", true)
+        .order("display_order", { ascending: true })
+    : { data: [], error: null };
+
+  if (featuresError) {
+    throw featuresError;
+  }
+
+  const featureMap = new Map(
+    (features ?? []).map((feature) => [
+      feature.id,
+      {
+        id: feature.id,
+        name: feature.name,
+        description: feature.description,
+        category: feature.category,
+      },
+    ]),
+  );
+
+  return activePlans.map<SubscriptionPlanCatalogItem>((plan) => ({
+    ...plan,
+    benefits: (featureAccessRows ?? [])
+      .filter((row) => row.plan_id === plan.id && row.is_enabled)
+      .map((row) => featureMap.get(row.feature_id))
+      .filter((benefit): benefit is NonNullable<typeof benefit> => Boolean(benefit)),
+  }));
 }

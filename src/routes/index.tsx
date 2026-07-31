@@ -1,6 +1,5 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
-  Check,
   Calendar,
   Droplet,
   Sparkles,
@@ -13,9 +12,9 @@ import {
   UserRound,
 } from "lucide-react";
 import heroImg from "@/assets/hero-hair.jpg";
+import { SubscriptionPlanShowcase } from "@/components/subscription-plan-showcase";
 import { SiteHeader } from "@/components/SiteHeader";
 import { useAuth } from "@/hooks/use-auth";
-import { toast } from "sonner";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -69,32 +68,6 @@ const features = [
   },
 ];
 
-const plans = [
-  {
-    name: "Essencial",
-    price: "R$ 0",
-    period: "para sempre",
-    features: ["Cronograma básico semanal", "3 dicas por semana", "Lembretes diários"],
-    cta: "Começar grátis",
-    highlighted: false,
-  },
-  {
-    name: "Premium",
-    price: "R$ 19,90",
-    period: "/mês",
-    features: [
-      "Cronograma 100% personalizado",
-      "Diário, semanal e mensal",
-      "Biblioteca completa de dicas",
-      "Sistema de conquistas",
-      "Acompanhamento de evolução",
-      "Suporte prioritário",
-    ],
-    cta: "Assinar Premium",
-    highlighted: true,
-  },
-];
-
 const quickLinks = [
   {
     to: "/",
@@ -124,22 +97,8 @@ const quickLinks = [
 
 function Landing() {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const primaryCta = user ? "/cronograma" : "/auth";
   const userName = user?.user_metadata?.display_name || user?.email?.split("@")[0];
-
-  const handleSubscribePremium = () => {
-    if (!user) {
-      toast.info("Entre na sua conta primeiro para assinar o Premium");
-      navigate({ to: "/auth" });
-      return;
-    }
-    toast.info("Assinatura Premium em breve! Estamos preparando o checkout.");
-  };
-
-  const scrollTo = (id: string) => {
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
-  };
 
   return (
     <div className="min-h-screen">
@@ -168,13 +127,12 @@ function Landing() {
                 {user ? "Ver meu cronograma" : "Começar grátis"}{" "}
                 <ArrowRight className="h-4 w-4 transition-smooth group-hover:translate-x-1" />
               </Link>
-              <button
-                type="button"
-                onClick={() => scrollTo("planos")}
+              <Link
+                to="/assinatura"
                 className="inline-flex items-center justify-center rounded-full border border-border bg-card/50 px-7 py-3.5 font-bold backdrop-blur transition-smooth hover:bg-card"
               >
                 Ver planos
-              </button>
+              </Link>
             </div>
             <div className="flex flex-col gap-4 pt-4 text-sm text-muted-foreground sm:flex-row sm:items-center sm:gap-6">
               <div className="flex -space-x-2">
@@ -278,57 +236,8 @@ function Landing() {
         </div>
       </section>
 
-      {/* PLANS */}
-      <section id="planos" className="section-anchor container mx-auto px-4 py-24">
-        <div className="text-center max-w-2xl mx-auto mb-16">
-          <h2 className="text-4xl md:text-5xl font-black">
-            Escolha seu <span className="text-gradient">plano</span>
-          </h2>
-          <p className="mt-4 text-muted-foreground">Cancele quando quiser. Sem fidelidade.</p>
-        </div>
-        <div className="grid gap-6 md:grid-cols-2 max-w-4xl mx-auto">
-          {plans.map((p) => (
-            <div
-              key={p.name}
-              className={`relative rounded-3xl p-8 transition-smooth ${p.highlighted ? "bg-gradient-card border-2 border-primary shadow-elegant" : "bg-card/50 border border-border"}`}
-            >
-              {p.highlighted && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-primary px-4 py-1 text-xs font-bold text-primary-foreground shadow-glow">
-                  MAIS POPULAR
-                </span>
-              )}
-              <h3 className="text-2xl font-black">{p.name}</h3>
-              <div className="mt-4 flex items-baseline gap-1">
-                <span className="text-5xl font-black">{p.price}</span>
-                <span className="text-muted-foreground">{p.period}</span>
-              </div>
-              <ul className="mt-6 space-y-3">
-                {p.features.map((feat) => (
-                  <li key={feat} className="flex items-start gap-3 text-sm">
-                    <Check className="h-5 w-5 shrink-0 text-primary" />
-                    <span>{feat}</span>
-                  </li>
-                ))}
-              </ul>
-              {p.highlighted ? (
-                <button
-                  type="button"
-                  onClick={handleSubscribePremium}
-                  className="mt-8 inline-flex w-full items-center justify-center rounded-full px-6 py-3 font-bold transition-smooth bg-gradient-primary text-primary-foreground shadow-glow hover:scale-105"
-                >
-                  {p.cta}
-                </button>
-              ) : (
-                <Link
-                  to={primaryCta}
-                  className="mt-8 inline-flex w-full items-center justify-center rounded-full px-6 py-3 font-bold transition-smooth border border-border hover:bg-card"
-                >
-                  {p.cta}
-                </Link>
-              )}
-            </div>
-          ))}
-        </div>
+      <section id="planos" className="section-anchor">
+        <SubscriptionPlanShowcase mode="preview" />
       </section>
 
       {/* CTA */}

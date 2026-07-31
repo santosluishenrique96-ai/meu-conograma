@@ -3,6 +3,7 @@ import {
   deleteSubscriptionPlan,
   getCurrentUserSubscription,
   listSubscriptionPlans,
+  listPublicPlanCatalog,
   saveSubscriptionPlan,
   updateSubscriptionPlanOrder,
   updateSubscriptionPlanStatus,
@@ -25,6 +26,14 @@ export function useAdminSubscriptionPlans(enabled = true) {
   });
 }
 
+export function usePublicPlanCatalog() {
+  return useQuery({
+    queryKey: ["subscription-plans", "catalog"],
+    queryFn: listPublicPlanCatalog,
+    staleTime: 60_000,
+  });
+}
+
 export function useCurrentUserSubscription(userId?: string) {
   return useQuery({
     queryKey: ["user-subscription", userId],
@@ -40,6 +49,8 @@ export function useSubscriptionPlanAdminMutations() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["subscription-plans"] }),
       queryClient.invalidateQueries({ queryKey: ["user-subscription"] }),
+      queryClient.invalidateQueries({ queryKey: ["plan-feature-access"] }),
+      queryClient.invalidateQueries({ queryKey: ["user-plan-permissions"] }),
     ]);
   };
 

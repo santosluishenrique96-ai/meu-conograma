@@ -3,6 +3,9 @@ import type { Tables, TablesInsert, TablesUpdate } from "@/integrations/supabase
 export type SubscriptionPlanRow = Tables<"subscription_plans">;
 export type SubscriptionPlanInsert = TablesInsert<"subscription_plans">;
 export type SubscriptionPlanUpdate = TablesUpdate<"subscription_plans">;
+export type SubscriptionFeatureRow = Tables<"subscription_features">;
+export type SubscriptionFeatureInsert = TablesInsert<"subscription_features">;
+export type PlanFeatureAccessRow = Tables<"plan_feature_access">;
 export type UserSubscriptionRow = Tables<"user_subscriptions">;
 
 export const SUBSCRIPTION_PLAN_ICON_OPTIONS = [
@@ -49,6 +52,27 @@ export type SubscriptionPlanFormValues = {
   is_active: boolean;
 };
 
+export type SubscriptionFeatureFormValues = {
+  id?: string;
+  feature_key: string;
+  name: string;
+  description: string;
+  category: string;
+  display_order: number;
+  is_active: boolean;
+};
+
+export type PlanFeatureAccessMap = Record<string, Record<string, boolean>>;
+
+export type SubscriptionPlanCatalogItem = SubscriptionPlanRow & {
+  benefits: Array<{
+    id: string;
+    name: string;
+    description: string;
+    category: string;
+  }>;
+};
+
 export const EMPTY_SUBSCRIPTION_PLAN_FORM: SubscriptionPlanFormValues = {
   name: "",
   description: "",
@@ -60,6 +84,15 @@ export const EMPTY_SUBSCRIPTION_PLAN_FORM: SubscriptionPlanFormValues = {
   icon: "sparkles",
   button_text: "Escolher plano",
   badge: "",
+  display_order: 1,
+  is_active: true,
+};
+
+export const EMPTY_SUBSCRIPTION_FEATURE_FORM: SubscriptionFeatureFormValues = {
+  feature_key: "",
+  name: "",
+  description: "",
+  category: "Geral",
   display_order: 1,
   is_active: true,
 };
