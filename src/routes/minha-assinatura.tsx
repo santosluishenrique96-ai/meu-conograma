@@ -28,6 +28,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useAuth } from "@/hooks/use-auth";
 import {
+  useBillingGateways,
+  usePrepareBillingPortalAction,
+  usePrepareCheckoutSession,
+} from "@/hooks/use-billing-gateways";
+import {
   useProvisionUserSubscription,
   useUserSubscriptionSnapshot,
 } from "@/hooks/use-user-subscriptions";
@@ -158,6 +163,9 @@ function MinhaAssinaturaPage() {
 
   const snapshotQuery = useUserSubscriptionSnapshot(user?.id);
   const provisionMutation = useProvisionUserSubscription();
+  const gatewayQuery = useBillingGateways();
+  const prepareCheckoutMutation = usePrepareCheckoutSession();
+  const prepareBillingActionMutation = usePrepareBillingPortalAction();
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -247,16 +255,64 @@ function MinhaAssinaturaPage() {
     ],
   );
 
-  const handleAction = (action: Exclude<PendingAction, null>) => {
-    const messages: Record<Exclude<PendingAction, null>, string> = {
-      cancel:
-        "Fluxo de cancelamento preparado. Vamos integrar o checkout e o gateway de pagamento na proxima etapa.",
-      reactivate:
-        "Fluxo de reativacao preparado. Assim que o pagamento entrar, a acao podera ser executada daqui.",
-    };
+  const availableGateways = gatewayQuery.data ?? [];
+  const primaryGateway = availableGateways[0] ?? null;
 
-    toast.info(messages[action]);
-    setPendingAction(null);
+  const handleAction = async (action: Exclude<PendingAction, null>) => {
+    if (!user || !currentSubscription) {
+      toast.error("Sua assinatura ainda nao possui dados suficientes para essa acao.");
+      setPendingAction(null);
+      return;
+    }
+
+    try {
+      if (action === "cancel") {
+        const preparedAction = await prepareBillingActionMutation.mutateAsync({
+          action: "cancel",
+          customer: {
+            userId: user.id,
+            email: user.email ?? null,
+            displayName: (user.user_metadata?.display_name as string | undefined) ?? null,
+          },
+          currentSubscription,
+          returnUrl:
+            typeof window !== "undefined" ? `${window.location.origin}/minha-assinatura` : undefined,
+          metadata: {
+            source: "minha-assinatura",
+          },
+        });
+
+        toast.info(`${preparedAction.message} Gateway previsto: ${preparedAction.gateway.name}.`);
+      }
+
+      if (action === "reactivate" && currentPlan) {
+        const preparedCheckout = await prepareCheckoutMutation.mutateAsync({
+          action: "reactivate",
+          billingInterval: (currentSubscription.billing_interval ?? "monthly") as "monthly" | "annual",
+          plan: currentPlan,
+          customer: {
+            userId: user.id,
+            email: user.email ?? null,
+            displayName: (user.user_metadata?.display_name as string | undefined) ?? null,
+          },
+          currentSubscription,
+          successUrl:
+            typeof window !== "undefined" ? `${window.location.origin}/minha-assinatura` : undefined,
+          cancelUrl:
+            typeof window !== "undefined" ? `${window.location.origin}/minha-assinatura` : undefined,
+          metadata: {
+            source: "minha-assinatura",
+          },
+        });
+
+        toast.info(`${preparedCheckout.message} Gateway previsto: ${preparedCheckout.gateway.name}.`);
+      }
+    } catch (error) {
+      console.error("[minha-assinatura] erro ao preparar acao de billing", error);
+      toast.error("Nao foi possivel preparar essa acao agora.");
+    } finally {
+      setPendingAction(null);
+    }
   };
 
   if (authLoading || !user) {
@@ -423,20 +479,20 @@ function MinhaAssinaturaPage() {
                     type="button"
                     variant="outline"
                     className="rounded-full px-6 py-3 font-bold"
-                    disabled={!canCancel}
+                    disabled={!canCancel || prepareBillingActionMutation.isPending}
                     onClick={() => setPendingAction("cancel")}
                   >
-                    Cancelar
+                    {prepareBillingActionMutation.isPending ? "Preparando..." : "Cancelar"}
                   </Button>
 
                   <Button
                     type="button"
                     variant="outline"
                     className="rounded-full px-6 py-3 font-bold"
-                    disabled={!canReactivate}
+                    disabled={!canReactivate || prepareCheckoutMutation.isPending}
                     onClick={() => setPendingAction("reactivate")}
                   >
-                    Reativar
+                    {prepareCheckoutMutation.isPending ? "Preparando..." : "Reativar"}
                   </Button>
                 </div>
 
@@ -482,8 +538,59 @@ function MinhaAssinaturaPage() {
                     sem retrabalho visual.
                   </p>
                 </div>
+
+                <div className="mt-4 rounded-2xl border border-border bg-background/50 p-5">
+                  <div className="text-sm font-bold">Gateway principal preparado</div>
+                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                    {primaryGateway
+                      ? `${primaryGateway.name} foi definido como resolucao padrao, mas a camada de billing ja aceita troca futura de gateway sem alterar os componentes da assinatura.`
+                      : "A camada generica de billing ja esta pronta para receber um gateway padrao."}
+                  </p>
+                </div>
               </aside>
             </div>
+
+            <section className="mt-8 rounded-3xl border border-border bg-gradient-card p-6 md:p-8">
+              <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+                    <CreditCard className="h-3.5 w-3.5" /> Gateways preparados
+                  </div>
+                  <h2 className="mt-4 text-3xl font-black">Arquitetura pronta para trocar de gateway</h2>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    O checkout futuro podera ser ligado com Stripe, Mercado Pago, Asaas, PagSeguro,
+                    Kirvano, Kiwify, Hotmart, Eduzz ou Monetizze usando os mesmos contratos.
+                  </p>
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {availableGateways.length} gateways catalogados
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {availableGateways.map((gateway) => (
+                  <div key={gateway.key} className="rounded-3xl border border-border bg-background/50 p-5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-lg font-black">{gateway.name}</div>
+                      <Badge variant="outline">{gateway.statusLabel}</Badge>
+                    </div>
+                    <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                      {gateway.description}
+                    </p>
+                    <div className="mt-4 text-xs uppercase tracking-wider text-muted-foreground">
+                      Capacidades
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {gateway.capabilities.map((capability) => (
+                        <Badge key={capability} variant="secondary">
+                          {capability}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
 
             <section className="mt-8 rounded-3xl border border-border bg-gradient-card p-6 md:p-8">
               <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">

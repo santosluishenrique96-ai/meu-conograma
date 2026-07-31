@@ -3,9 +3,11 @@ import { useNavigate } from "@tanstack/react-router";
 import { ArrowRight, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
+import { usePrepareCheckoutSession } from "@/hooks/use-billing-gateways";
 import { usePublicPlanCatalog } from "@/hooks/use-subscription-plans";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import type { SubscriptionPlanCatalogItem } from "@/types/subscriptions";
 
 type BillingMode = "monthly" | "annual";
 
@@ -72,17 +74,39 @@ export function SubscriptionPlanShowcase({
   const { user } = useAuth();
   const catalogQuery = usePublicPlanCatalog();
   const [billingMode, setBillingMode] = useState<BillingMode>("monthly");
+  const prepareCheckoutMutation = usePrepareCheckoutSession();
 
   const plans = useMemo(() => catalogQuery.data ?? [], [catalogQuery.data]);
 
-  const handleSubscribe = (planName: string) => {
+  const handleSubscribe = async (plan: SubscriptionPlanCatalogItem) => {
     if (!user) {
-      toast.info(`Entre na sua conta para continuar com o plano ${planName}`);
+      toast.info(`Entre na sua conta para continuar com o plano ${plan.name}`);
       navigate({ to: "/auth" });
       return;
     }
 
-    toast.info(`Assinatura do plano ${planName} em breve. O checkout ainda nao foi integrado.`);
+    try {
+      const session = await prepareCheckoutMutation.mutateAsync({
+        action: "subscribe",
+        billingInterval: billingMode,
+        plan,
+        customer: {
+          userId: user.id,
+          email: user.email ?? null,
+          displayName: (user.user_metadata?.display_name as string | undefined) ?? null,
+        },
+        successUrl: typeof window !== "undefined" ? `${window.location.origin}/minha-assinatura` : undefined,
+        cancelUrl: typeof window !== "undefined" ? `${window.location.origin}/assinatura` : undefined,
+        metadata: {
+          source: mode,
+        },
+      });
+
+      toast.info(`${session.message} Gateway previsto: ${session.gateway.name}.`);
+    } catch (error) {
+      console.error("[subscription-plan-showcase] erro ao preparar checkout", error);
+      toast.error("Nao foi possivel preparar o checkout deste plano agora.");
+    }
   };
 
   const maxBenefits = mode === "preview" ? 4 : 8;
@@ -256,13 +280,22 @@ export function SubscriptionPlanShowcase({
 
                       <Button
                         type="button"
-                        onClick={() => handleSubscribe(plan.name)}
+                        onClick={() => void handleSubscribe(plan)}
+                        disabled={prepareCheckoutMutation.isPending}
                         className="mt-8 h-12 rounded-full text-sm font-bold text-primary-foreground shadow-glow"
                         style={{
                           background: `linear-gradient(135deg, ${plan.color} 0%, ${plan.color}CC 100%)`,
                         }}
                       >
-                        {plan.button_text || "Assinar"} <ArrowRight className="h-4 w-4" />
+                        {prepareCheckoutMutation.isPending ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" /> Preparando checkout
+                          </>
+                        ) : (
+                          <>
+                            {plan.button_text || "Assinar"} <ArrowRight className="h-4 w-4" />
+                          </>
+                        )}
                       </Button>
                     </div>
                   </article>
