@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  ArrowRight,
   Check,
   Droplet,
   Leaf,
@@ -13,6 +14,11 @@ import {
   Save,
   Camera,
   Loader2,
+  ClipboardList,
+  WandSparkles,
+  Target,
+  RefreshCw,
+  ShoppingBag,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -79,6 +85,42 @@ type DayKey = (typeof DAYS)[number]["key"];
 
 const HAIR_TYPES = ["Liso", "Ondulado", "Cacheado", "Crespo"];
 const GOALS = ["Crescimento", "Brilho", "Reduzir frizz", "Recuperar danificados", "Manutenção"];
+const CORE_FOCUS = ["Hidratação", "Nutrição", "Reconstrução"] as const;
+
+type CoreFocusType = (typeof CORE_FOCUS)[number];
+type HairGoal = (typeof GOALS)[number];
+
+type FocusScore = Record<CoreFocusType, number>;
+type Concern = {
+  key: string;
+  label: string;
+  desc: string;
+  focus: CoreFocusType;
+  weight: number;
+  tip: string;
+};
+
+type QuizOption = {
+  key: string;
+  label: string;
+  desc: string;
+  scores: Partial<FocusScore>;
+};
+
+type QuizQuestion = {
+  key: string;
+  question: string;
+  helper: string;
+  options: QuizOption[];
+};
+
+type ProductRecommendation = {
+  focus: CoreFocusType;
+  name: string;
+  subtitle: string;
+  whenToUse: string;
+  benefits: string[];
+};
 
 const diario = [
   {
@@ -113,32 +155,195 @@ const diario = [
   },
 ];
 
-const mensal = [
+const CONCERNS: Concern[] = [
   {
-    week: "Semana 1",
-    focus: "Reset Capilar",
-    tasks: [
-      "Limpeza profunda com shampoo antirresíduo",
-      "Hidratação reparadora",
-      "Corte de pontas (se necessário)",
+    key: "secura",
+    label: "Ressecado e sem maciez",
+    desc: "Fio áspero, armado e com toque seco.",
+    focus: "Hidratação",
+    weight: 3,
+    tip: "Priorize máscaras com babosa, pantenol e glicerina para devolver água aos fios.",
+  },
+  {
+    key: "opacidade",
+    label: "Sem brilho",
+    desc: "Cabelo opaco e sem vida mesmo limpo.",
+    focus: "Hidratação",
+    weight: 2,
+    tip: "Finalize com leave-in leve e aposte em hidratações de selagem para refletir mais luz.",
+  },
+  {
+    key: "frizz",
+    label: "Frizz e volume excessivo",
+    desc: "Fios desalinhados e difíceis de controlar.",
+    focus: "Nutrição",
+    weight: 3,
+    tip: "Nutrição com óleos e manteigas ajuda a alinhar cutículas e reduzir o arrepiado.",
+  },
+  {
+    key: "pontas",
+    label: "Pontas espigadas",
+    desc: "Pontas ásperas, porosas ou abrindo com facilidade.",
+    focus: "Nutrição",
+    weight: 2,
+    tip: "Use umectação nas pontas e selagem com finalizador nutritivo para proteger o comprimento.",
+  },
+  {
+    key: "quebra",
+    label: "Quebra com facilidade",
+    desc: "Fio parte no pentear, desembaraçar ou lavar.",
+    focus: "Reconstrução",
+    weight: 3,
+    tip: "Reconstrução entra em cena com queratina, aminoácidos e proteínas em intervalo controlado.",
+  },
+  {
+    key: "emborrachado",
+    label: "Elástico ou emborrachado",
+    desc: "Quando molhado, estica demais e não volta.",
+    focus: "Reconstrução",
+    weight: 4,
+    tip: "Evite excesso de química e faça uma reconstrução seguida de hidratação para equilibrar.",
+  },
+];
+
+const QUIZ_QUESTIONS: QuizQuestion[] = [
+  {
+    key: "feel",
+    question: "Como seu cabelo fica ao toque depois de seco?",
+    helper: "Esse sinal mostra a necessidade mais urgente do fio.",
+    options: [
+      {
+        key: "rough",
+        label: "Áspero e seco",
+        desc: "Perde maciez rápido e parece pedir água toda hora.",
+        scores: { Hidratação: 3, Nutrição: 1 },
+      },
+      {
+        key: "frizzy",
+        label: "Macio, mas com frizz",
+        desc: "Falta alinhamento e proteção lipídica.",
+        scores: { Nutrição: 3, Hidratação: 1 },
+      },
+      {
+        key: "fragile",
+        label: "Mole ou frágil",
+        desc: "Pode indicar perda de massa e fibra sensibilizada.",
+        scores: { Reconstrução: 3, Hidratação: 1 },
+      },
     ],
   },
   {
-    week: "Semana 2",
-    focus: "Intensivo de Nutrição",
-    tasks: ["Nutrição com óleos vegetais", "Umectação noturna 1x", "Foto de acompanhamento"],
+    key: "wash",
+    question: "O que acontece logo após a lavagem?",
+    helper: "Observe como o fio responde nas primeiras horas.",
+    options: [
+      {
+        key: "dries_fast",
+        label: "Resseca rápido",
+        desc: "Mesmo com creme, perde maciez em pouco tempo.",
+        scores: { Hidratação: 2, Nutrição: 1 },
+      },
+      {
+        key: "poofy",
+        label: "Arma e arrepia",
+        desc: "Fica volumoso e sem definição.",
+        scores: { Nutrição: 3 },
+      },
+      {
+        key: "breaks",
+        label: "Fica frágil",
+        desc: "Quebra ou estica demais ao desembaraçar.",
+        scores: { Reconstrução: 3 },
+      },
+    ],
   },
   {
-    week: "Semana 3",
-    focus: "Força & Reconstrução",
-    tasks: ["Reconstrução com queratina", "Banho de brilho", "Avaliação de elasticidade"],
+    key: "chemistry",
+    question: "Seu cabelo passou por química, calor frequente ou descoloração?",
+    helper: "Isso altera bastante a força e a regularidade do cronograma.",
+    options: [
+      {
+        key: "none",
+        label: "Quase nunca",
+        desc: "Pouca agressão química ou térmica.",
+        scores: { Hidratação: 1, Nutrição: 1 },
+      },
+      {
+        key: "sometimes",
+        label: "Às vezes",
+        desc: "Secador, chapinha ou química pontual.",
+        scores: { Nutrição: 2, Reconstrução: 1 },
+      },
+      {
+        key: "often",
+        label: "Com frequência",
+        desc: "Coloração, alisamento, calor intenso ou descoloração.",
+        scores: { Reconstrução: 3, Nutrição: 1 },
+      },
+    ],
   },
   {
-    week: "Semana 4",
-    focus: "Brilho & Manutenção",
-    tasks: ["Hidratação selante", "Hidratação ácida (vinagre de maçã)", "Avaliação dos resultados"],
+    key: "goal",
+    question: "Qual resultado você mais quer perceber nas próximas semanas?",
+    helper: "Esse desejo ajuda a ajustar o foco principal da rotina.",
+    options: [
+      {
+        key: "shine",
+        label: "Mais brilho e maciez",
+        desc: "Fio soltinho, leve e com toque sedoso.",
+        scores: { Hidratação: 2 },
+      },
+      {
+        key: "alignment",
+        label: "Menos frizz e mais definição",
+        desc: "Cutículas mais seladas e aspecto alinhado.",
+        scores: { Nutrição: 2 },
+      },
+      {
+        key: "strength",
+        label: "Menos quebra e mais força",
+        desc: "Fibra resistente para recuperar danos.",
+        scores: { Reconstrução: 2 },
+      },
+    ],
   },
 ];
+
+const PRODUCT_RECOMMENDATIONS: Record<CoreFocusType, ProductRecommendation> = {
+  Hidratação: {
+    focus: "Hidratação",
+    name: "Kit Hidratação Gloss",
+    subtitle: "Maciez intensa e brilho imediato",
+    whenToUse: "Ideal quando o cabelo está opaco, áspero ou perdendo maciez rápido.",
+    benefits: [
+      "Ajuda a devolver água e maleabilidade aos fios",
+      "Combina bem com fases de brilho e toque sedoso",
+      "Funciona como base segura para começar o cronograma",
+    ],
+  },
+  Nutrição: {
+    focus: "Nutrição",
+    name: "Kit Nutrição Power Oils",
+    subtitle: "Controle de frizz e nutrição profunda",
+    whenToUse: "Indicado para cabelos com frizz, pontas secas e dificuldade de alinhamento.",
+    benefits: [
+      "Ajuda a selar o fio e reduzir arrepiado",
+      "Melhora definição, brilho e proteção do comprimento",
+      "Muito útil em cabelos porosos ou com pontas espigadas",
+    ],
+  },
+  Reconstrução: {
+    focus: "Reconstrução",
+    name: "Kit Reconstrução Expert",
+    subtitle: "Força, elasticidade e reparo",
+    whenToUse: "Perfeito quando o fio quebra, estica demais ou sofreu química e calor frequente.",
+    benefits: [
+      "Reposição de massa para cabelos fragilizados",
+      "Ajuda a devolver resistência e elasticidade",
+      "Ideal para usar com intervalo e apoio de hidratação",
+    ],
+  },
+};
 
 type Prefs = {
   hair_type: string | null;
@@ -166,6 +371,132 @@ const DEFAULT_PREFS: Prefs = {
 
 const focusOptions = Object.keys(FOCUS_TYPES) as FocusType[];
 
+function createEmptyScores(): FocusScore {
+  return {
+    Hidratação: 0,
+    Nutrição: 0,
+    Reconstrução: 0,
+  };
+}
+
+function addPartialScores(target: FocusScore, partial: Partial<FocusScore>) {
+  CORE_FOCUS.forEach((focus) => {
+    target[focus] += partial[focus] ?? 0;
+  });
+}
+
+function getGoalFromRanking(topFocus: CoreFocusType, secondFocus: CoreFocusType): HairGoal {
+  if (topFocus === "Reconstrução") return "Recuperar danificados";
+  if (topFocus === "Nutrição") return "Reduzir frizz";
+  if (topFocus === "Hidratação" && secondFocus === "Reconstrução") return "Crescimento";
+  if (topFocus === "Hidratação") return "Brilho";
+  return "Manutenção";
+}
+
+function buildWeeklyPlan(ranking: CoreFocusType[], scores: FocusScore): Record<DayKey, FocusType> {
+  const [topFocus, secondFocus, thirdFocus] = ranking;
+  const needsIntensiveRepair = scores.Reconstrução >= 5;
+
+  return {
+    monday: topFocus,
+    tuesday: "Descanso",
+    wednesday: topFocus === "Reconstrução" ? "Hidratação" : secondFocus,
+    thursday: "Descanso",
+    friday: topFocus === "Nutrição" ? "Hidratação" : topFocus,
+    saturday: needsIntensiveRepair ? "Reconstrução" : thirdFocus,
+    sunday: "Cuidado",
+  };
+}
+
+function buildMonthlyGuide(ranking: CoreFocusType[]) {
+  const [topFocus, secondFocus, thirdFocus] = ranking;
+
+  return [
+    {
+      week: "Semana 1",
+      focus: `${topFocus} de recuperação`,
+      tasks: [
+        `Faça 1 tratamento de ${topFocus.toLowerCase()} com tempo completo de pausa`,
+        "Fotografe o antes para comparar textura, brilho e definição",
+        "Observe como o cabelo responde 48 horas depois",
+      ],
+    },
+    {
+      week: "Semana 2",
+      focus: `${secondFocus} para equilíbrio`,
+      tasks: [
+        `Inclua um cuidado de ${secondFocus.toLowerCase()} para completar a fibra`,
+        "Ajuste a quantidade de produto para não pesar o fio",
+        "Anote se o frizz, toque ou elasticidade melhoraram",
+      ],
+    },
+    {
+      week: "Semana 3",
+      focus: `Manutenção com ${topFocus.toLowerCase()}`,
+      tasks: [
+        `Repita o foco principal em ${topFocus.toLowerCase()} para consolidar o resultado`,
+        "Capriche na finalização e proteção térmica",
+        "Reavalie pontas, brilho e maleabilidade",
+      ],
+    },
+    {
+      week: "Semana 4",
+      focus: `Fechamento com ${thirdFocus.toLowerCase()}`,
+      tasks: [
+        `Use ${thirdFocus.toLowerCase()} para fechar o ciclo com equilíbrio`,
+        "Faça uma lavagem mais cuidadosa e finalize com sérum ou óleo leve",
+        "Defina o próximo mês com base no que mais evoluiu",
+      ],
+    },
+  ];
+}
+
+function buildDiagnosis(selectedConcerns: string[], answers: Record<string, string>) {
+  const scores = createEmptyScores();
+  const selectedConcernItems = CONCERNS.filter((concern) => selectedConcerns.includes(concern.key));
+
+  selectedConcernItems.forEach((concern) => {
+    scores[concern.focus] += concern.weight;
+  });
+
+  QUIZ_QUESTIONS.forEach((question) => {
+    const option = question.options.find((item) => item.key === answers[question.key]);
+    if (option) addPartialScores(scores, option.scores);
+  });
+
+  if (Object.values(scores).every((value) => value === 0)) {
+    scores.Hidratação = 2;
+    scores.Nutrição = 2;
+    scores.Reconstrução = 1;
+  }
+
+  const ranking = [...CORE_FOCUS].sort((a, b) => scores[b] - scores[a]);
+  const [topFocus, secondFocus] = ranking;
+  const recommendedGoal = getGoalFromRanking(topFocus, secondFocus);
+  const weeklyPlan = buildWeeklyPlan(ranking, scores);
+  const monthlyGuide = buildMonthlyGuide(ranking);
+  const highlightedTips = [
+    ...selectedConcernItems.slice(0, 3).map((concern) => concern.tip),
+    `Seu cronograma ideal agora é liderado por ${topFocus.toLowerCase()}, com apoio de ${secondFocus.toLowerCase()} para equilibrar os fios.`,
+  ].slice(0, 4);
+
+  const summaryByFocus: Record<CoreFocusType, string> = {
+    Hidratação: "Seu cabelo está pedindo mais reposição de água, maciez e brilho.",
+    Nutrição: "Seu fio precisa de mais nutrição para alinhar, reduzir frizz e segurar definição.",
+    Reconstrução: "A fibra mostra sinais de fragilidade e merece reconstrução com mais cuidado.",
+  };
+
+  return {
+    scores,
+    ranking,
+    recommendedGoal,
+    weeklyPlan,
+    monthlyGuide,
+    highlightedTips,
+    summary: summaryByFocus[topFocus],
+  };
+}
+
 function parseFocusType(value: string): FocusType {
   return value in FOCUS_TYPES ? (value as FocusType) : "Cuidado";
 }
@@ -178,6 +509,8 @@ function CronogramaPage() {
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [showSettings, setShowSettings] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [selectedConcerns, setSelectedConcerns] = useState<string[]>([]);
+  const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!loading && !user) {
@@ -208,7 +541,27 @@ function CronogramaPage() {
       });
   }, [user]);
 
-  const savePrefs = async () => {
+  const diagnosis = useMemo(
+    () => buildDiagnosis(selectedConcerns, quizAnswers),
+    [quizAnswers, selectedConcerns],
+  );
+  const recommendedProducts = useMemo(
+    () =>
+      diagnosis.ranking.map((focus, index) => ({
+        ...PRODUCT_RECOMMENDATIONS[focus],
+        priorityLabel:
+          index === 0
+            ? "Mais indicado agora"
+            : index === 1
+              ? "Complementa seu tratamento"
+              : "Apoio para equilíbrio",
+      })),
+    [diagnosis.ranking],
+  );
+
+  const answeredQuestions = Object.keys(quizAnswers).length;
+
+  const savePrefs = async (nextPrefs: Prefs = prefs) => {
     if (!user) {
       toast.error("Faça login para salvar sua personalização");
       return;
@@ -216,12 +569,13 @@ function CronogramaPage() {
     setSaving(true);
     const { error } = await supabase
       .from("schedule_preferences")
-      .upsert({ user_id: user.id, ...prefs }, { onConflict: "user_id" });
+      .upsert({ user_id: user.id, ...nextPrefs }, { onConflict: "user_id" });
     setSaving(false);
     if (error) toast.error("Erro ao salvar");
     else {
       toast.success("Cronograma personalizado!");
       setShowSettings(false);
+      setPrefs(nextPrefs);
     }
   };
 
@@ -242,6 +596,29 @@ function CronogramaPage() {
       const nextPrefs: Prefs = { ...prev, [day]: focus };
       return nextPrefs;
     });
+  };
+
+  const toggleConcern = (concernKey: string) => {
+    setSelectedConcerns((prev) =>
+      prev.includes(concernKey)
+        ? prev.filter((item) => item !== concernKey)
+        : [...prev, concernKey],
+    );
+  };
+
+  const answerQuiz = (questionKey: string, optionKey: string) => {
+    setQuizAnswers((prev) => ({ ...prev, [questionKey]: optionKey }));
+  };
+
+  const applySuggestedRoutine = () => {
+    const nextPrefs: Prefs = {
+      ...prefs,
+      goal: diagnosis.recommendedGoal,
+      ...diagnosis.weeklyPlan,
+    };
+    setPrefs(nextPrefs);
+    setShowSettings(true);
+    toast.success("Sugestão aplicada. Revise e salve sua personalização.");
   };
 
   if (loading || !user) {
@@ -285,6 +662,269 @@ function CronogramaPage() {
           >
             <Settings className="h-4 w-4" /> Personalizar
           </button>
+        </div>
+
+        <div className="mt-8 rounded-3xl border border-primary/30 bg-gradient-card p-6 md:p-8">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+                <ClipboardList className="h-3.5 w-3.5" /> Diagnóstico guiado
+              </span>
+              <h2 className="mt-4 text-2xl font-black md:text-3xl">
+                Descubra o que seu cabelo está pedindo agora
+              </h2>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                Marque os sinais que você percebe e responda ao teste capilar. A tela interpreta os
+                sintomas, explica o motivo e sugere um cronograma mais próximo do ideal para os seus
+                fios.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm">
+              <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Teste concluído
+              </div>
+              <div className="mt-1 text-2xl font-black text-gradient">
+                {answeredQuestions}/{QUIZ_QUESTIONS.length}
+              </div>
+              <div className="text-xs text-muted-foreground">perguntas respondidas</div>
+            </div>
+          </div>
+
+          <div className="mt-8">
+            <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              1. Marque o que você percebe no seu cabelo hoje
+            </label>
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {CONCERNS.map((concern) => {
+                const isSelected = selectedConcerns.includes(concern.key);
+                const meta = FOCUS_TYPES[concern.focus];
+                const Icon = meta.icon;
+
+                return (
+                  <button
+                    key={concern.key}
+                    type="button"
+                    onClick={() => toggleConcern(concern.key)}
+                    className={`rounded-2xl border p-4 text-left transition-smooth ${isSelected ? "border-primary bg-primary/10 shadow-glow" : "border-border bg-background/40 hover:border-primary/50"}`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div
+                        className={`inline-flex items-center gap-2 rounded-full bg-gradient-to-r ${meta.color} px-3 py-1 text-xs font-bold text-background`}
+                      >
+                        <Icon className="h-3.5 w-3.5" /> {concern.focus}
+                      </div>
+                      {isSelected && <Check className="h-4 w-4 text-primary" />}
+                    </div>
+                    <div className="mt-3 font-bold">{concern.label}</div>
+                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                      {concern.desc}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-8">
+            <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              2. Faça seu teste capilar rápido
+            </label>
+            <div className="mt-3 grid gap-4 xl:grid-cols-2">
+              {QUIZ_QUESTIONS.map((question) => (
+                <div
+                  key={question.key}
+                  className="rounded-2xl border border-border bg-background/40 p-4"
+                >
+                  <div className="font-bold">{question.question}</div>
+                  <p className="mt-1 text-sm text-muted-foreground">{question.helper}</p>
+                  <div className="mt-4 space-y-2">
+                    {question.options.map((option) => {
+                      const isSelected = quizAnswers[question.key] === option.key;
+
+                      return (
+                        <button
+                          key={option.key}
+                          type="button"
+                          onClick={() => answerQuiz(question.key, option.key)}
+                          className={`w-full rounded-2xl border p-3 text-left transition-smooth ${isSelected ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"}`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="font-semibold">{option.label}</div>
+                              <div className="mt-1 text-sm text-muted-foreground">
+                                {option.desc}
+                              </div>
+                            </div>
+                            {isSelected && (
+                              <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-8 grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+            <div className="rounded-3xl border border-primary/30 bg-background/50 p-6">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-primary shadow-glow">
+                  <WandSparkles className="h-5 w-5 text-primary-foreground" />
+                </div>
+                <div>
+                  <div className="font-bold">Sua leitura capilar</div>
+                  <div className="text-xs text-muted-foreground">
+                    Resultado pensado a partir dos sinais e respostas do teste
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-3 md:grid-cols-3">
+                {diagnosis.ranking.map((focus) => (
+                  <div key={focus} className="rounded-2xl border border-border bg-card/60 p-4">
+                    <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                      {focus}
+                    </div>
+                    <div className="mt-2 text-3xl font-black text-gradient">
+                      {diagnosis.scores[focus]}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">pontos de prioridade</div>
+                  </div>
+                ))}
+              </div>
+
+              <p className="mt-5 text-sm leading-relaxed text-foreground/90">{diagnosis.summary}</p>
+
+              <div className="mt-5 rounded-2xl border border-border bg-card/50 p-4">
+                <div className="inline-flex items-center gap-2 text-sm font-bold text-primary">
+                  <Target className="h-4 w-4" /> Objetivo sugerido
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  O sistema recomenda focar em{" "}
+                  <strong className="text-foreground">{diagnosis.recommendedGoal}</strong> neste
+                  momento, porque esse caminho conversa melhor com os sinais que seu cabelo está
+                  mostrando.
+                </p>
+              </div>
+
+              <div className="mt-5 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={applySuggestedRoutine}
+                  className="inline-flex items-center gap-2 rounded-full bg-gradient-primary px-6 py-2.5 text-sm font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105"
+                >
+                  <RefreshCw className="h-4 w-4" /> Aplicar sugestão ao cronograma
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSettings(true)}
+                  className="rounded-full border border-border px-6 py-2.5 text-sm font-bold text-muted-foreground transition-smooth hover:border-primary hover:text-primary"
+                >
+                  Revisar manualmente
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-border bg-background/50 p-6">
+              <div className="font-bold">Dicas para chegar no cronograma ideal</div>
+              <div className="mt-1 text-sm text-muted-foreground">
+                Use estas observações como guia enquanto ajusta sua rotina.
+              </div>
+              <ul className="mt-5 space-y-3">
+                {diagnosis.highlightedTips.map((tip) => (
+                  <li key={tip} className="flex items-start gap-3 text-sm">
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                    <span className="leading-relaxed text-foreground/90">{tip}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          <div className="mt-8 rounded-3xl border border-border bg-background/50 p-6">
+            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div className="max-w-2xl">
+                <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+                  <ShoppingBag className="h-3.5 w-3.5" /> Produtos indicados
+                </span>
+                <h3 className="mt-4 text-2xl font-black">
+                  O que usar para seguir seu cronograma com mais clareza
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  Separei os kits que mais combinam com o seu diagnóstico atual para facilitar a
+                  escolha entre hidratação, nutrição e reconstrução.
+                </p>
+              </div>
+              <Link
+                to="/produtos"
+                search={{ focus: undefined }}
+                className="inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-5 py-3 text-sm font-bold transition-smooth hover:border-primary hover:text-primary"
+              >
+                Ver todos os produtos <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+
+            <div className="mt-6 grid gap-4 xl:grid-cols-3">
+              {recommendedProducts.map((product) => {
+                const meta = FOCUS_TYPES[product.focus];
+                const Icon = meta.icon;
+
+                return (
+                  <div
+                    key={product.focus}
+                    className="rounded-3xl border border-border bg-card/60 p-5 transition-smooth hover:border-primary/50"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div
+                        className={`inline-flex items-center gap-2 rounded-full bg-gradient-to-r ${meta.color} px-3 py-1 text-xs font-bold text-background`}
+                      >
+                        <Icon className="h-3.5 w-3.5" /> {product.focus}
+                      </div>
+                      <span className="text-xs font-semibold text-muted-foreground">
+                        {product.priorityLabel}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 text-lg font-black">{product.name}</div>
+                    <p className="mt-1 text-sm font-medium text-foreground/90">
+                      {product.subtitle}
+                    </p>
+                    <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                      {product.whenToUse}
+                    </p>
+
+                    <ul className="mt-4 space-y-2">
+                      {product.benefits.map((benefit) => (
+                        <li key={benefit} className="flex items-start gap-3 text-sm">
+                          <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                          <span className="leading-relaxed text-foreground/90">{benefit}</span>
+                        </li>
+                      ))}
+                    </ul>
+
+                    <Link
+                      to="/produtos"
+                      search={{ focus: product.focus }}
+                      className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-gradient-primary px-5 py-3 text-sm font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105"
+                    >
+                      Adicionar esse kit ao meu tratamento <ArrowRight className="h-4 w-4" />
+                    </Link>
+
+                    <Link
+                      to="/produtos"
+                      search={{ focus: product.focus }}
+                      className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-primary transition-smooth hover:gap-3"
+                    >
+                      Abrir vitrine de produtos <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         {/* Settings panel */}
@@ -334,6 +974,10 @@ function CronogramaPage() {
                     </button>
                   ))}
                 </div>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Sugestão atual do teste:{" "}
+                  <span className="font-semibold text-foreground">{diagnosis.recommendedGoal}</span>
+                </p>
               </div>
             </div>
 
@@ -366,7 +1010,7 @@ function CronogramaPage() {
 
             <div className="mt-6 flex flex-wrap gap-3">
               <button
-                onClick={savePrefs}
+                onClick={() => savePrefs()}
                 disabled={saving}
                 className="inline-flex items-center gap-2 rounded-full bg-gradient-primary px-6 py-2.5 text-sm font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105 disabled:opacity-50"
               >
@@ -496,7 +1140,7 @@ function CronogramaPage() {
 
           {tab === "mensal" && (
             <div className="grid gap-5 md:grid-cols-2">
-              {mensal.map((m) => (
+              {diagnosis.monthlyGuide.map((m) => (
                 <div
                   key={m.week}
                   className="rounded-3xl bg-gradient-card border border-border p-7 transition-smooth hover:border-primary/50"

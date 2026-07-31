@@ -222,6 +222,7 @@ function Landing() {
               </div>
               <Link
                 to="/produtos"
+                search={{ focus: undefined }}
                 className="inline-flex items-center gap-2 rounded-full border border-border bg-background/70 px-5 py-3 text-sm font-bold transition-smooth hover:border-primary hover:text-primary"
               >
                 Ver produtos <ArrowRight className="h-4 w-4" />

@@ -65,6 +65,60 @@ export type Database = {
         };
         Relationships: [];
       };
+      products: {
+        Row: {
+          badge: string;
+          benefits: string[];
+          created_at: string;
+          created_by: string | null;
+          cta_mode: string;
+          external_url: string;
+          focus: string;
+          id: string;
+          image_url: string;
+          name: string;
+          price_value: number;
+          sort_order: number;
+          subtitle: string;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          badge?: string;
+          benefits?: string[];
+          created_at?: string;
+          created_by?: string | null;
+          cta_mode?: string;
+          external_url?: string;
+          focus?: string;
+          id: string;
+          image_url?: string;
+          name: string;
+          price_value?: number;
+          sort_order?: number;
+          subtitle: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          badge?: string;
+          benefits?: string[];
+          created_at?: string;
+          created_by?: string | null;
+          cta_mode?: string;
+          external_url?: string;
+          focus?: string;
+          id?: string;
+          image_url?: string;
+          name?: string;
+          price_value?: number;
+          sort_order?: number;
+          subtitle?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [];
+      };
       schedule_preferences: {
         Row: {
           created_at: string;
@@ -113,12 +167,61 @@ export type Database = {
         };
         Relationships: [];
       };
+      store_settings: {
+        Row: {
+          created_at: string;
+          id: string;
+          updated_at: string;
+          updated_by: string | null;
+          whatsapp_number: string;
+        };
+        Insert: {
+          created_at?: string;
+          id: string;
+          updated_at?: string;
+          updated_by?: string | null;
+          whatsapp_number?: string;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+          whatsapp_number?: string;
+        };
+        Relationships: [];
+      };
+      store_admins: {
+        Row: {
+          created_at: string;
+          id: string;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          id?: string;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      current_user_is_store_admin: {
+        Args: Record<PropertyKey, never>;
+        Returns: boolean;
+      };
+      has_store_admins: {
+        Args: Record<PropertyKey, never>;
+        Returns: boolean;
+      };
     };
     Enums: {
       [_ in never]: never;
