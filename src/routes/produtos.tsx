@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   Check,
@@ -333,6 +333,7 @@ function ProdutosPage() {
   const [whatsAppNumber, setWhatsAppNumber] = useState(ENV_WHATSAPP_PHONE || "");
   const [whatsAppDraft, setWhatsAppDraft] = useState(ENV_WHATSAPP_PHONE || "");
   const [savingWhatsApp, setSavingWhatsApp] = useState(false);
+  const [loadingWhatsAppNumber, setLoadingWhatsAppNumber] = useState(true);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [draft, setDraft] = useState<Product | null>(null);
@@ -387,22 +388,39 @@ function ProdutosPage() {
     void loadProducts();
   }, []);
 
-  useEffect(() => {
-    const loadStoreSettings = async () => {
-      const { data, error } = await supabase.from("store_settings").select("*").maybeSingle();
+  const loadStoreSettings = useCallback(
+    async ({ syncDraft = true, silent = false }: { syncDraft?: boolean; silent?: boolean } = {}) => {
+      setLoadingWhatsAppNumber(true);
+
+      const { data, error } = await supabase
+        .from("store_settings")
+        .select("*")
+        .eq("id", "main")
+        .maybeSingle();
+
+      setLoadingWhatsAppNumber(false);
 
       if (error) {
         console.error("[produtos] erro ao carregar configuracoes da loja", error);
-        return;
+        if (!silent) {
+          toast.error("Não foi possível carregar o WhatsApp da loja agora");
+        }
+        return normalizePhoneNumber(ENV_WHATSAPP_PHONE || "");
       }
 
-      const nextPhone = mapStoreSettingsPhone(data);
+      const nextPhone = normalizePhoneNumber(mapStoreSettingsPhone(data));
       setWhatsAppNumber(nextPhone);
-      setWhatsAppDraft(nextPhone);
-    };
+      if (syncDraft) {
+        setWhatsAppDraft(nextPhone);
+      }
+      return nextPhone;
+    },
+    [],
+  );
 
+  useEffect(() => {
     void loadStoreSettings();
-  }, []);
+  }, [loadStoreSettings]);
 
   useEffect(() => {
     const loadAdminState = async () => {
@@ -449,8 +467,12 @@ function ProdutosPage() {
     });
   }, [highlightedFocus, products]);
 
-  const openWhatsApp = (message: string) => {
-    const phoneNumber = normalizePhoneNumber(whatsAppNumber || ENV_WHATSAPP_PHONE || "");
+  const openWhatsApp = async (message: string) => {
+    let phoneNumber = normalizePhoneNumber(whatsAppNumber || ENV_WHATSAPP_PHONE || "");
+
+    if (!phoneNumber) {
+      phoneNumber = await loadStoreSettings({ syncDraft: false, silent: true });
+    }
 
     if (!phoneNumber) {
       toast.error("Configure primeiro o número do WhatsApp da loja");
@@ -475,7 +497,7 @@ function ProdutosPage() {
 
   const handleProductWhatsApp = (product: Product) => {
     const message = `Oi! Tenho interesse no ${product.name} (${formatCurrency(product.priceValue)}). Quero mais detalhes sobre esse produto capilar.`;
-    openWhatsApp(message);
+    void openWhatsApp(message);
   };
 
   const addToCart = (product: Product) => {
@@ -553,7 +575,7 @@ function ProdutosPage() {
       `Oi! Quero finalizar meu pedido com estes itens:\n\n${itemsList}\n\n` +
       `Total estimado: ${formatCurrency(cartTotal)}.`;
 
-    openWhatsApp(message);
+    void openWhatsApp(message);
   };
 
   const refreshProducts = async () => {
@@ -1000,7 +1022,8 @@ function ProdutosPage() {
                   </p>
                 </div>
                 <div className="rounded-full border border-border px-4 py-2 text-sm text-muted-foreground">
-                  Número atual: {whatsAppNumber || "não configurado"}
+                  Número atual:{" "}
+                  {loadingWhatsAppNumber ? "carregando..." : whatsAppNumber || "não configurado"}
                 </div>
               </div>
 
