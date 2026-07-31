@@ -184,6 +184,7 @@ const reasons = [
 
 const CART_STORAGE_KEY = "meu-cronograma-cart";
 const ENV_WHATSAPP_PHONE = import.meta.env.VITE_WHATSAPP_NUMBER;
+const STORE_ADMIN_EMAIL = "santosluishenrique96@gmail.com";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", {
@@ -328,9 +329,7 @@ function ProdutosPage() {
   const [cartOpen, setCartOpen] = useState(false);
 
   const [isAdmin, setIsAdmin] = useState(false);
-  const [canClaimAdmin, setCanClaimAdmin] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
-  const [claimingAdmin, setClaimingAdmin] = useState(false);
   const [whatsAppNumber, setWhatsAppNumber] = useState(ENV_WHATSAPP_PHONE || "");
   const [whatsAppDraft, setWhatsAppDraft] = useState(ENV_WHATSAPP_PHONE || "");
   const [savingWhatsApp, setSavingWhatsApp] = useState(false);
@@ -409,30 +408,21 @@ function ProdutosPage() {
     const loadAdminState = async () => {
       if (!user) {
         setIsAdmin(false);
-        setCanClaimAdmin(false);
+        setAdminLoading(false);
         return;
       }
 
       setAdminLoading(true);
 
-      const [
-        { data: isCurrentAdmin, error: adminError },
-        { data: hasAdmins, error: hasAdminsError },
-      ] = await Promise.all([
-        supabase.rpc("current_user_is_store_admin"),
-        supabase.rpc("has_store_admins"),
-      ]);
+      const { data: isCurrentAdmin, error: adminError } =
+        await supabase.rpc("current_user_is_store_admin");
 
       if (adminError) {
         console.error("[produtos] erro ao consultar admin atual", adminError);
       }
 
-      if (hasAdminsError) {
-        console.error("[produtos] erro ao consultar admins da loja", hasAdminsError);
-      }
-
-      setIsAdmin(Boolean(isCurrentAdmin));
-      setCanClaimAdmin(Boolean(user) && !Boolean(isCurrentAdmin) && !Boolean(hasAdmins));
+      const emailMatchesAdmin = user.email?.toLowerCase() === STORE_ADMIN_EMAIL;
+      setIsAdmin(Boolean(isCurrentAdmin) || emailMatchesAdmin);
       setAdminLoading(false);
     };
 
@@ -583,30 +573,6 @@ function ProdutosPage() {
     }
 
     setProductsLoading(false);
-  };
-
-  const claimAdminAccess = async () => {
-    if (!user) {
-      toast.info("Entre na sua conta para ativar a edição da loja");
-      navigate({ to: "/auth" });
-      return;
-    }
-
-    setClaimingAdmin(true);
-
-    const { error } = await supabase.from("store_admins").insert({ user_id: user.id });
-
-    setClaimingAdmin(false);
-
-    if (error) {
-      console.error("[produtos] erro ao assumir admin", error);
-      toast.error("Não foi possível ativar o acesso de admin agora");
-      return;
-    }
-
-    setIsAdmin(true);
-    setCanClaimAdmin(false);
-    toast.success("Seu acesso de admin da loja foi ativado");
   };
 
   const saveWhatsAppNumber = async () => {
@@ -800,6 +766,8 @@ function ProdutosPage() {
     await refreshProducts();
   };
 
+  const showAdminPanel = Boolean(user) && (isAdmin || adminLoading);
+
   return (
     <div className="min-h-screen">
       <SiteHeader />
@@ -815,8 +783,8 @@ function ProdutosPage() {
               Produtos que combinam com o seu <span className="text-gradient">cronograma</span>.
             </h1>
             <p className="max-w-2xl text-lg text-muted-foreground">
-              Agora a loja lê o catálogo do Supabase e você pode manter nome, preço, imagem por URL
-              e links de afiliado atualizados em qualquer dispositivo.
+              Monte sua rotina com kits pensados para hidratação, nutrição, reconstrução e
+              finalização, com compra simples e atendimento direto pelo WhatsApp.
             </p>
             <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap">
               <Link
@@ -968,8 +936,8 @@ function ProdutosPage() {
             </h2>
             <p className="mt-3 text-sm text-muted-foreground">
               {user
-                ? "A vitrine está conectada ao Supabase. O primeiro admin pode ativar o controle da loja e editar os produtos para todo mundo."
-                : "Entre na sua conta para ver a loja completa e, se for admin, editar o catálogo."}
+                ? "Escolha seus kits favoritos, monte sua rotina e finalize o pedido pelo WhatsApp."
+                : "Entre na sua conta para acompanhar seu cronograma e escolher os produtos ideais para o seu cabelo."}
             </p>
             <ul className="mt-6 space-y-3">
               {reasons.map((reason) => (
@@ -983,7 +951,7 @@ function ProdutosPage() {
         </div>
       </section>
 
-      {user && (
+      {showAdminPanel && (
         <section className="container mx-auto px-4 pt-2 pb-8">
           <div className="rounded-3xl border border-primary/20 bg-gradient-card p-6 md:p-8">
             <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
@@ -991,11 +959,10 @@ function ProdutosPage() {
                 <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
                   <Settings2 className="h-3.5 w-3.5" /> Gestão da loja
                 </span>
-                <h2 className="mt-4 text-3xl font-black md:text-4xl">Catálogo salvo no Supabase</h2>
+                <h2 className="mt-4 text-3xl font-black md:text-4xl">Painel da administradora</h2>
                 <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                  Nesta versão a edição usa imagem por URL, preço, nome, selo e link de afiliado
-                  salvos no banco. Assim a loja fica igual em qualquer dispositivo e só o admin da
-                  loja consegue alterar esses dados.
+                  Aqui você controla os produtos da vitrine, os preços, os links e o número de
+                  atendimento usado nos botões de WhatsApp da loja.
                 </p>
               </div>
 
@@ -1003,7 +970,7 @@ function ProdutosPage() {
                 <div className="inline-flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" /> Verificando acesso
                 </div>
-              ) : isAdmin ? (
+              ) : (
                 <div className="flex flex-col gap-3 sm:flex-row">
                   <Button
                     type="button"
@@ -1021,44 +988,15 @@ function ProdutosPage() {
                     <RotateCcw className="h-4 w-4" /> Restaurar catálogo
                   </Button>
                 </div>
-              ) : canClaimAdmin ? (
-                <Button
-                  type="button"
-                  onClick={claimAdminAccess}
-                  disabled={claimingAdmin}
-                  className="rounded-full px-6 py-3 font-bold"
-                >
-                  {claimingAdmin ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" /> Ativando...
-                    </>
-                  ) : (
-                    <>
-                      <Settings2 className="h-4 w-4" /> Ativar meu acesso de admin
-                    </>
-                  )}
-                </Button>
-              ) : (
-                <div className="rounded-full border border-border px-4 py-2 text-sm text-muted-foreground">
-                  Edição disponível apenas para admin da loja
-                </div>
               )}
             </div>
-
-            {canClaimAdmin && (
-              <p className="mt-4 text-sm text-muted-foreground">
-                Como ainda não existe admin cadastrado, o primeiro acesso autenticado pode assumir
-                esse papel para gerenciar a vitrine.
-              </p>
-            )}
 
             <div className="mt-6 rounded-3xl border border-border bg-background/40 p-5">
               <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                 <div className="max-w-2xl">
                   <div className="font-bold">Direcionamento do WhatsApp da loja</div>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Esse número é usado nos botões de WhatsApp dos produtos e do carrinho. Usuárias
-                    comuns não conseguem editar, apenas o admin da loja.
+                    Esse número é usado nos botões de WhatsApp dos produtos e do carrinho.
                   </p>
                 </div>
                 <div className="rounded-full border border-border px-4 py-2 text-sm text-muted-foreground">
@@ -1066,7 +1004,7 @@ function ProdutosPage() {
                 </div>
               </div>
 
-              {isAdmin ? (
+              {!adminLoading && isAdmin && (
                 <div className="mt-4 flex flex-col gap-3 md:flex-row">
                   <input
                     value={whatsAppDraft}
@@ -1091,10 +1029,6 @@ function ProdutosPage() {
                     )}
                   </Button>
                 </div>
-              ) : (
-                <p className="mt-4 text-sm text-muted-foreground">
-                  Esse ajuste fica bloqueado para usuárias comuns.
-                </p>
               )}
             </div>
           </div>

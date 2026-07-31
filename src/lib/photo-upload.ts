@@ -1,3 +1,5 @@
+import { supabase } from "@/integrations/supabase/client";
+
 export const BUCKET = "evolution-photos";
 
 export const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB
@@ -41,6 +43,31 @@ export function buildStoragePath(userId: string, file: File) {
   return `${userId}/${Date.now()}-${rand}.${ext}`;
 }
 
+/**
+ * Ensures the browser client has a valid auth session before touching Storage/DB.
+ * This avoids stale tabs trying to upload with an expired access token.
+ */
+export async function ensureActiveSession() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+
+  let session = data.session;
+  const expiresAt = session?.expires_at ? session.expires_at * 1000 : 0;
+  const shouldRefresh = !session || (expiresAt > 0 && expiresAt - Date.now() < 60_000);
+
+  if (shouldRefresh) {
+    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError) throw refreshError;
+    session = refreshed.session;
+  }
+
+  if (!session?.user) {
+    throw new Error("AUTH_SESSION_EXPIRED");
+  }
+
+  return session;
+}
+
 /** Extracts the object path from a public storage URL (fallback for legacy rows). */
 export function pathFromPublicUrl(url: string): string | null {
   const marker = `/${BUCKET}/`;
@@ -67,12 +94,16 @@ export function friendlyUploadError(err: unknown): string {
     return "Essa foto já foi enviada. Tente novamente.";
   }
   if (
-    lower.includes("row-level security") ||
-    lower.includes("permission") ||
-    lower.includes("unauthorized") ||
-    lower.includes("jwt")
+    lower.includes("jwt expired") ||
+    lower.includes("invalid jwt") ||
+    lower.includes("refresh token") ||
+    lower.includes("auth_session_expired") ||
+    lower.includes("session_not_found")
   ) {
     return "Sua sessão expirou. Entre novamente para enviar fotos.";
+  }
+  if (lower.includes("row-level security") || lower.includes("permission") || lower.includes("unauthorized")) {
+    return "Seu acesso ao envio de fotos foi recusado. Entre novamente e tente de novo.";
   }
   return msg || "Não foi possível enviar a foto. Tente novamente.";
 }

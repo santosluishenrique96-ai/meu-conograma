@@ -18,6 +18,7 @@ import {
   BUCKET,
   MAX_FILE_BYTES,
   buildStoragePath,
+  ensureActiveSession,
   formatBytes,
   friendlyUploadError,
   pathFromPublicUrl,
@@ -63,6 +64,18 @@ function EvolucaoPage() {
   const [note, setNote] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const handleAuthFailure = useCallback(
+    (err: unknown) => {
+      const message = friendlyUploadError(err);
+      const expired = message.includes("sessão expirou") || message.includes("acesso ao envio");
+      toast.error(message);
+      if (expired) {
+        navigate({ to: "/auth" });
+      }
+    },
+    [navigate],
+  );
+
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/auth" });
   }, [user, loading, navigate]);
@@ -71,10 +84,23 @@ function EvolucaoPage() {
     if (!user) return;
     setFetching(true);
     setLoadError(null);
+    let activeUserId = user.id;
+    try {
+      const session = await ensureActiveSession();
+      activeUserId = session.user.id;
+    } catch (err) {
+      const message = friendlyUploadError(err);
+      setLoadError(message);
+      if (message.includes("sessão expirou") || message.includes("acesso ao envio")) {
+        navigate({ to: "/auth" });
+      }
+      setFetching(false);
+      return;
+    }
     const { data, error } = await supabase
       .from("evolution_photos")
       .select("id, image_url, storage_path, note, taken_at")
-      .eq("user_id", user.id)
+      .eq("user_id", activeUserId)
       .order("taken_at", { ascending: false });
     if (error) {
       setLoadError(friendlyUploadError(error));
@@ -82,7 +108,7 @@ function EvolucaoPage() {
       setPhotos((data ?? []) as Photo[]);
     }
     setFetching(false);
-  }, [user]);
+  }, [navigate, user]);
 
   useEffect(() => {
     void loadPhotos();
@@ -106,8 +132,11 @@ function EvolucaoPage() {
     }
 
     setBusy(true);
-    const path = buildStoragePath(user.id, file);
     try {
+      const session = await ensureActiveSession();
+      const activeUserId = session.user.id;
+      const path = buildStoragePath(activeUserId, file);
+
       const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, {
         cacheControl: "3600",
         contentType: file.type,
@@ -120,7 +149,7 @@ function EvolucaoPage() {
       const { data, error } = await supabase
         .from("evolution_photos")
         .insert({
-          user_id: user.id,
+          user_id: activeUserId,
           image_url: pub.publicUrl,
           storage_path: path,
           note: note.trim().slice(0, 200) || null,
@@ -138,7 +167,7 @@ function EvolucaoPage() {
       setNote("");
       toast.success("Foto adicionada!");
     } catch (err) {
-      toast.error(friendlyUploadError(err));
+      handleAuthFailure(err);
     } finally {
       setBusy(false);
       resetInput();
@@ -149,6 +178,7 @@ function EvolucaoPage() {
     if (!confirm("Remover esta foto? Esta ação não pode ser desfeita.")) return;
     setDeletingId(photo.id);
     try {
+      await ensureActiveSession();
       const { error } = await supabase.from("evolution_photos").delete().eq("id", photo.id);
       if (error) throw error;
       const path = photo.storage_path ?? pathFromPublicUrl(photo.image_url);
@@ -156,7 +186,7 @@ function EvolucaoPage() {
       setPhotos((p) => p.filter((x) => x.id !== photo.id));
       toast.success("Foto removida");
     } catch (err) {
-      toast.error(friendlyUploadError(err));
+      handleAuthFailure(err);
     } finally {
       setDeletingId(null);
     }
