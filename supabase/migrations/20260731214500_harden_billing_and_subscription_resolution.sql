@@ -74,7 +74,7 @@ CREATE OR REPLACE FUNCTION public.upsert_billing_invoice(
   target_user_id UUID,
   target_subscription_id UUID DEFAULT NULL,
   target_plan_id UUID DEFAULT NULL,
-  target_gateway TEXT DEFAULT 'stripe',
+  target_gateway TEXT DEFAULT 'mercado-pago',
   target_status TEXT DEFAULT 'open',
   target_billing_reason TEXT DEFAULT 'manual',
   target_external_invoice_id TEXT DEFAULT NULL,

@@ -39,6 +39,7 @@ import {
   useProvisionUserSubscription,
   useUserSubscriptionSnapshot,
 } from "@/hooks/use-user-subscriptions";
+import { PRIMARY_BILLING_GATEWAY_KEY } from "@/types/billing";
 import type { BillingCheckoutSessionRow, BillingInvoiceRow } from "@/types/billing";
 import type { UserSubscriptionHistoryRow, UserSubscriptionStatus } from "@/types/subscriptions";
 
@@ -341,7 +342,13 @@ function MinhaAssinaturaPage() {
   );
 
   const availableGateways = gatewayQuery.data ?? [];
-  const primaryGateway = availableGateways[0] ?? null;
+  const primaryGateway = useMemo(
+    () =>
+      availableGateways.find((gateway) => gateway.key === PRIMARY_BILLING_GATEWAY_KEY) ??
+      availableGateways[0] ??
+      null,
+    [availableGateways],
+  );
 
   const handleAction = async (action: Exclude<PendingAction, null>) => {
     if (!user || !currentSubscription) {
@@ -353,6 +360,7 @@ function MinhaAssinaturaPage() {
     try {
       if (action === "cancel") {
         const preparedAction = await prepareBillingActionMutation.mutateAsync({
+          gateway: PRIMARY_BILLING_GATEWAY_KEY,
           action: "cancel",
           customer: {
             userId: user.id,
@@ -372,6 +380,7 @@ function MinhaAssinaturaPage() {
 
       if (action === "reactivate" && currentPlan) {
         const preparedCheckout = await prepareCheckoutMutation.mutateAsync({
+          gateway: PRIMARY_BILLING_GATEWAY_KEY,
           action: "reactivate",
           billingInterval: (currentSubscription.billing_interval ?? "monthly") as "monthly" | "annual",
           plan: currentPlan,

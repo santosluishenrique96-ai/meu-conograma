@@ -7,6 +7,7 @@ import { useCreateBillingCheckoutSessionIntent } from "@/hooks/use-billing-orche
 import { usePublicPlanCatalog } from "@/hooks/use-subscription-plans";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PRIMARY_BILLING_GATEWAY_KEY } from "@/types/billing";
 import type { SubscriptionPlanCatalogItem } from "@/types/subscriptions";
 
 type BillingMode = "monthly" | "annual";
@@ -87,6 +88,7 @@ export function SubscriptionPlanShowcase({
 
     try {
       const session = await prepareCheckoutMutation.mutateAsync({
+        gateway: PRIMARY_BILLING_GATEWAY_KEY,
         action: "subscribe",
         billingInterval: billingMode,
         plan,

@@ -1,3 +1,6 @@
+import {
+  PRIMARY_BILLING_GATEWAY_KEY,
+} from "@/types/billing";
 import type {
   BillingGatewayAdapter,
   BillingGatewayDefinition,
@@ -9,6 +12,22 @@ import type {
 } from "@/types/billing";
 
 const gatewayDefinitions: BillingGatewayDefinition[] = [
+  {
+    key: "mercado-pago",
+    name: "Mercado Pago",
+    marketingSite: "https://www.mercadopago.com.br/",
+    description: "Gateway forte para operacao local com Pix, boleto e cartao.",
+    supportedCountries: ["BR", "AR", "MX", "CL", "CO", "UY"],
+    capabilities: [
+      "checkout",
+      "subscription-upgrade",
+      "subscription-downgrade",
+      "subscription-cancel",
+      "webhook-sync",
+    ],
+    defaultCurrency: "BRL",
+    statusLabel: "Pronto para integrar",
+  },
   {
     key: "stripe",
     name: "Stripe",
@@ -22,22 +41,6 @@ const gatewayDefinitions: BillingGatewayDefinition[] = [
       "subscription-downgrade",
       "subscription-cancel",
       "subscription-reactivate",
-      "webhook-sync",
-    ],
-    defaultCurrency: "BRL",
-    statusLabel: "Pronto para integrar",
-  },
-  {
-    key: "mercado-pago",
-    name: "Mercado Pago",
-    marketingSite: "https://www.mercadopago.com.br/",
-    description: "Gateway forte para operacao local com Pix, boleto e cartao.",
-    supportedCountries: ["BR", "AR", "MX", "CL", "CO", "UY"],
-    capabilities: [
-      "checkout",
-      "subscription-upgrade",
-      "subscription-downgrade",
-      "subscription-cancel",
       "webhook-sync",
     ],
     defaultCurrency: "BRL",
@@ -203,7 +206,11 @@ const gatewayAdapters = new Map<BillingGatewayKey, BillingGatewayAdapter>(
 );
 
 export function listBillingGatewayDefinitions() {
-  return [...gatewayDefinitions];
+  return [...gatewayDefinitions].sort((left, right) => {
+    if (left.key === PRIMARY_BILLING_GATEWAY_KEY) return -1;
+    if (right.key === PRIMARY_BILLING_GATEWAY_KEY) return 1;
+    return left.name.localeCompare(right.name, "pt-BR");
+  });
 }
 
 export function resolveBillingGatewayKey(
@@ -219,7 +226,7 @@ export function resolveBillingGatewayKey(
     return normalizedCurrentProvider as BillingGatewayKey;
   }
 
-  return "stripe" satisfies BillingGatewayKey;
+  return PRIMARY_BILLING_GATEWAY_KEY;
 }
 
 export function getBillingGatewayAdapter(key?: BillingGatewayKey | null, currentProvider?: string | null) {

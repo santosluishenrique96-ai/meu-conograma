@@ -27,6 +27,8 @@ export const BILLING_GATEWAY_KEYS = [
 
 export type BillingGatewayKey = (typeof BILLING_GATEWAY_KEYS)[number];
 
+export const PRIMARY_BILLING_GATEWAY_KEY = "mercado-pago" satisfies BillingGatewayKey;
+
 export const BILLING_GATEWAY_CAPABILITIES = [
   "checkout",
   "customer-portal",
