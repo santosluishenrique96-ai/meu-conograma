@@ -350,6 +350,15 @@ function MinhaAssinaturaPage() {
     [availableGateways],
   );
 
+  const redirectToCheckout = (checkoutUrl: string | null, gatewayName: string) => {
+    if (!checkoutUrl) {
+      throw new Error(`O ${gatewayName} nao retornou a URL do checkout.`);
+    }
+
+    toast.success(`Redirecionando para o checkout do ${gatewayName}...`);
+    window.location.assign(checkoutUrl);
+  };
+
   const handleAction = async (action: Exclude<PendingAction, null>) => {
     if (!user || !currentSubscription) {
       toast.error("Sua assinatura ainda nao possui dados suficientes para essa acao.");
@@ -398,6 +407,11 @@ function MinhaAssinaturaPage() {
             source: "minha-assinatura",
           },
         });
+
+        if (preparedCheckout.checkoutUrl) {
+          redirectToCheckout(preparedCheckout.checkoutUrl, preparedCheckout.gateway.name);
+          return;
+        }
 
         toast.info(`${preparedCheckout.message} Gateway previsto: ${preparedCheckout.gateway.name}.`);
       }

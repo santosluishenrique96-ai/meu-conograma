@@ -1,6 +1,7 @@
 import {
   PRIMARY_BILLING_GATEWAY_KEY,
 } from "@/types/billing";
+import { supabase } from "@/integrations/supabase/client";
 import type {
   BillingGatewayAdapter,
   BillingGatewayDefinition,
@@ -148,6 +149,16 @@ function buildPlaceholderUrl(basePath: string, params: Record<string, string>) {
   return url.toString();
 }
 
+function buildBaseCheckoutMetadata(input: PrepareCheckoutSessionInput) {
+  return {
+    planName: input.plan.name,
+    billingInterval: input.billingInterval,
+    userId: input.customer.userId,
+    currentSubscriptionId: input.currentSubscription?.id ?? null,
+    ...input.metadata,
+  };
+}
+
 class PlaceholderBillingGatewayAdapter implements BillingGatewayAdapter {
   constructor(public definition: BillingGatewayDefinition) {}
 
@@ -167,13 +178,7 @@ class PlaceholderBillingGatewayAdapter implements BillingGatewayAdapter {
       }),
       priceAmount: getPlanAmount(input),
       currencyCode: this.definition.defaultCurrency,
-      metadata: {
-        planName: input.plan.name,
-        billingInterval: input.billingInterval,
-        userId: input.customer.userId,
-        currentSubscriptionId: input.currentSubscription?.id ?? null,
-        ...input.metadata,
-      },
+      metadata: buildBaseCheckoutMetadata(input),
       message: `${this.definition.name} foi selecionado como gateway. O fluxo real de checkout ainda nao foi conectado, mas a arquitetura ja esta pronta para receber a implementacao.`,
       isLive: false,
     };
@@ -201,8 +206,113 @@ class PlaceholderBillingGatewayAdapter implements BillingGatewayAdapter {
   }
 }
 
+class MercadoPagoBillingGatewayAdapter implements BillingGatewayAdapter {
+  constructor(public definition: BillingGatewayDefinition) {}
+
+  async prepareCheckoutSession(
+    input: PrepareCheckoutSessionInput,
+  ): Promise<PreparedCheckoutSession> {
+    if (input.action !== "subscribe") {
+      return {
+        gateway: this.definition,
+        action: input.action,
+        planId: input.plan.id,
+        checkoutMode: "redirect",
+        checkoutUrl: buildPlaceholderUrl("checkout", {
+          gateway: this.definition.key,
+          action: input.action,
+          plan: input.plan.slug,
+          interval: input.billingInterval,
+        }),
+        priceAmount: getPlanAmount(input),
+        currencyCode: this.definition.defaultCurrency,
+        metadata: buildBaseCheckoutMetadata(input),
+        message: `A acao ${input.action} ainda nao foi conectada ao fluxo real do ${this.definition.name}.`,
+        isLive: false,
+      };
+    }
+
+    const { data, error } = await supabase.functions.invoke("mercado-pago-create-checkout", {
+      body: {
+        userId: input.customer.userId,
+        planId: input.plan.id,
+        billingInterval: input.billingInterval,
+        successUrl: input.successUrl,
+        cancelUrl: input.cancelUrl,
+      },
+    });
+
+    if (error) {
+      const message =
+        error instanceof Error ? error.message : "Nao foi possivel iniciar o checkout do Mercado Pago.";
+      throw new Error(message);
+    }
+
+    const payload = (data ?? {}) as Record<string, unknown>;
+    const checkoutUrl =
+      typeof payload.checkoutUrl === "string" && payload.checkoutUrl.trim().length > 0
+        ? payload.checkoutUrl
+        : null;
+    const preferenceId =
+      typeof payload.preferenceId === "string" && payload.preferenceId.trim().length > 0
+        ? payload.preferenceId
+        : null;
+    const checkoutSessionId =
+      typeof payload.checkoutSessionId === "string" && payload.checkoutSessionId.trim().length > 0
+        ? payload.checkoutSessionId
+        : undefined;
+
+    if (!checkoutUrl || !preferenceId || !checkoutSessionId) {
+      throw new Error("O checkout do Mercado Pago nao retornou os identificadores obrigatorios.");
+    }
+
+    return {
+      id: checkoutSessionId,
+      gateway: this.definition,
+      action: input.action,
+      planId: input.plan.id,
+      checkoutMode: "redirect",
+      checkoutUrl,
+      priceAmount: getPlanAmount(input),
+      currencyCode: this.definition.defaultCurrency,
+      metadata: {
+        ...buildBaseCheckoutMetadata(input),
+        preferenceId,
+      },
+      message: `${this.definition.name} iniciou o checkout real com sucesso.`,
+      isLive: true,
+    };
+  }
+
+  async prepareBillingPortalAction(
+    input: PrepareBillingPortalActionInput,
+  ): Promise<PreparedBillingPortalAction> {
+    return {
+      gateway: this.definition,
+      action: input.action,
+      portalUrl: buildPlaceholderUrl("portal", {
+        gateway: this.definition.key,
+        action: input.action,
+        subscription: input.currentSubscription?.id ?? "sem-assinatura",
+      }),
+      message: `${this.definition.name} ainda nao possui portal ou acao real conectada para ${input.action}.`,
+      isLive: false,
+      metadata: {
+        subscriptionId: input.currentSubscription?.id ?? null,
+        providerSubscriptionId: input.currentSubscription?.provider_subscription_id ?? null,
+        ...input.metadata,
+      },
+    };
+  }
+}
+
 const gatewayAdapters = new Map<BillingGatewayKey, BillingGatewayAdapter>(
-  gatewayDefinitions.map((definition) => [definition.key, new PlaceholderBillingGatewayAdapter(definition)]),
+  gatewayDefinitions.map((definition) => [
+    definition.key,
+    definition.key === "mercado-pago"
+      ? new MercadoPagoBillingGatewayAdapter(definition)
+      : new PlaceholderBillingGatewayAdapter(definition),
+  ]),
 );
 
 export function listBillingGatewayDefinitions() {

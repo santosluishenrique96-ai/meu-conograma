@@ -79,6 +79,15 @@ export function SubscriptionPlanShowcase({
 
   const plans = useMemo(() => catalogQuery.data ?? [], [catalogQuery.data]);
 
+  const redirectToCheckout = (checkoutUrl: string | null, gatewayName: string) => {
+    if (!checkoutUrl) {
+      throw new Error(`O ${gatewayName} nao retornou a URL do checkout.`);
+    }
+
+    toast.success(`Redirecionando para o checkout do ${gatewayName}...`);
+    window.location.assign(checkoutUrl);
+  };
+
   const handleSubscribe = async (plan: SubscriptionPlanCatalogItem) => {
     if (!user) {
       toast.info(`Entre na sua conta para continuar com o plano ${plan.name}`);
@@ -104,7 +113,7 @@ export function SubscriptionPlanShowcase({
         },
       });
 
-      toast.info(`${session.message} Gateway previsto: ${session.gateway.name}.`);
+      redirectToCheckout(session.checkoutUrl, session.gateway.name);
     } catch (error) {
       console.error("[subscription-plan-showcase] erro ao preparar checkout", error);
       toast.error("Nao foi possivel preparar o checkout deste plano agora.");

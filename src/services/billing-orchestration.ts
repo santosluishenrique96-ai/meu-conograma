@@ -55,6 +55,10 @@ export async function createBillingCheckoutSessionIntent(
 ): Promise<PreparedCheckoutSession> {
   const preparedSession = await prepareCheckoutSession(input);
 
+  if (preparedSession.id) {
+    return preparedSession;
+  }
+
   const { data, error } = await supabase.rpc("record_billing_checkout_session", {
     target_plan_id: input.plan.id,
     target_gateway: preparedSession.gateway.key,
