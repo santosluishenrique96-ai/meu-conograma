@@ -1,7 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
-  ArrowRight,
   Check,
   Droplet,
   Leaf,
@@ -18,7 +17,6 @@ import {
   WandSparkles,
   Target,
   RefreshCw,
-  ShoppingBag,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { FeatureAccessGuard } from "@/components/feature-access-guard";
@@ -552,19 +550,6 @@ function CronogramaPage() {
     () => buildDiagnosis(selectedConcerns, quizAnswers),
     [quizAnswers, selectedConcerns],
   );
-  const recommendedProducts = useMemo(
-    () =>
-      diagnosis.ranking.map((focus, index) => ({
-        ...PRODUCT_RECOMMENDATIONS[focus],
-        priorityLabel:
-          index === 0
-            ? "Mais indicado agora"
-            : index === 1
-              ? "Complementa seu tratamento"
-              : "Apoio para equilíbrio",
-      })),
-    [diagnosis.ranking],
-  );
 
   const answeredQuestions = Object.keys(quizAnswers).length;
 
@@ -871,88 +856,6 @@ function CronogramaPage() {
                     </li>
                   ))}
                 </ul>
-              </div>
-            </div>
-
-            <div className="mt-8 rounded-3xl border border-border bg-background/50 p-6">
-              <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                <div className="max-w-2xl">
-                  <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
-                    <ShoppingBag className="h-3.5 w-3.5" /> Produtos indicados
-                  </span>
-                  <h3 className="mt-4 text-2xl font-black">
-                    O que usar para seguir seu cronograma com mais clareza
-                  </h3>
-                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                    Separei os kits que mais combinam com o seu diagnóstico atual para facilitar a
-                    escolha entre hidratação, nutrição e reconstrução.
-                  </p>
-                </div>
-                <Link
-                  to="/produtos"
-                  search={{ focus: undefined }}
-                  className="inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-5 py-3 text-sm font-bold transition-smooth hover:border-primary hover:text-primary"
-                >
-                  Ver todos os produtos <ArrowRight className="h-4 w-4" />
-                </Link>
-              </div>
-
-              <div className="mt-6 grid gap-4 xl:grid-cols-3">
-                {recommendedProducts.map((product) => {
-                  const meta = FOCUS_TYPES[product.focus];
-                  const Icon = meta.icon;
-
-                  return (
-                    <div
-                      key={product.focus}
-                      className="rounded-3xl border border-border bg-card/60 p-5 transition-smooth hover:border-primary/50"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div
-                          className={`inline-flex items-center gap-2 rounded-full bg-gradient-to-r ${meta.color} px-3 py-1 text-xs font-bold text-background`}
-                        >
-                          <Icon className="h-3.5 w-3.5" /> {product.focus}
-                        </div>
-                        <span className="text-xs font-semibold text-muted-foreground">
-                          {product.priorityLabel}
-                        </span>
-                      </div>
-
-                      <div className="mt-4 text-lg font-black">{product.name}</div>
-                      <p className="mt-1 text-sm font-medium text-foreground/90">
-                        {product.subtitle}
-                      </p>
-                      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                        {product.whenToUse}
-                      </p>
-
-                      <ul className="mt-4 space-y-2">
-                        {product.benefits.map((benefit) => (
-                          <li key={benefit} className="flex items-start gap-3 text-sm">
-                            <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                            <span className="leading-relaxed text-foreground/90">{benefit}</span>
-                          </li>
-                        ))}
-                      </ul>
-
-                      <Link
-                        to="/produtos"
-                        search={{ focus: product.focus }}
-                        className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-gradient-primary px-5 py-3 text-sm font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105"
-                      >
-                        Adicionar esse kit ao meu tratamento <ArrowRight className="h-4 w-4" />
-                      </Link>
-
-                      <Link
-                        to="/produtos"
-                        search={{ focus: product.focus }}
-                        className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-primary transition-smooth hover:gap-3"
-                      >
-                        Abrir vitrine de produtos <ArrowRight className="h-4 w-4" />
-                      </Link>
-                    </div>
-                  );
-                })}
               </div>
             </div>
           </div>

@@ -8,7 +8,6 @@ import {
   Trophy,
   ArrowRight,
   House,
-  ShoppingBag,
   UserRound,
 } from "lucide-react";
 import heroImg from "@/assets/hero-hair.jpg";
@@ -74,12 +73,6 @@ const quickLinks = [
     title: "Início",
     desc: "Volte para a visão geral e novidades do app.",
     icon: House,
-  },
-  {
-    to: "/produtos",
-    title: "Produtos",
-    desc: "Veja os kits e ofertas para seu cronograma capilar.",
-    icon: ShoppingBag,
   },
   {
     to: "/cronograma",
@@ -178,13 +171,6 @@ function Landing() {
                   espaço.
                 </p>
               </div>
-              <Link
-                to="/produtos"
-                search={{ focus: undefined }}
-                className="inline-flex items-center gap-2 rounded-full border border-border bg-background/70 px-5 py-3 text-sm font-bold transition-smooth hover:border-primary hover:text-primary"
-              >
-                Ver produtos <ArrowRight className="h-4 w-4" />
-              </Link>
             </div>
 
             <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">

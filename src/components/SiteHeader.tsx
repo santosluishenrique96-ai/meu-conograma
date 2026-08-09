@@ -7,7 +7,6 @@ import { toast } from "sonner";
 const publicNavItems = [
   { to: "/", label: "Início" },
   { to: "/assinatura", label: "Planos" },
-  { to: "/produtos", label: "Produtos" },
   { to: "/cronograma", label: "Cronograma" },
   { to: "/evolucao", label: "Evolução" },
 ] as const;

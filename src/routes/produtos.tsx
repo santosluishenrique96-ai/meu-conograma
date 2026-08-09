@@ -63,6 +63,9 @@ export const Route = createFileRoute("/produtos")({
       },
     ],
   }),
+  beforeLoad: ({ context, navigate }) => {
+    navigate({ to: "/" });
+  },
   component: ProdutosPage,
 });
 
