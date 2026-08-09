@@ -140,6 +140,16 @@ function requireEnv(name: string) {
   return value;
 }
 
+function getOptionalEnv(name: string) {
+  const value = Deno.env.get(name);
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
 function createSupabaseServiceRoleClient(supabaseUrl: string, serviceRoleKey: string) {
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
@@ -312,6 +322,47 @@ async function validateWebhookSignature({
     requestId,
     timestamp,
     manifest,
+  };
+}
+
+async function resolveWebhookValidation({
+  webhookSecret,
+  notification,
+  request,
+  resourceId,
+}: {
+  webhookSecret: string | null;
+  notification: MercadoPagoNotification;
+  request: Request;
+  resourceId: string | null;
+}) {
+  if (webhookSecret) {
+    const validation = await validateWebhookSignature({
+      secret: webhookSecret,
+      request,
+      resourceId,
+    });
+
+    return {
+      ...validation,
+      mode: "validated" as const,
+    };
+  }
+
+  if (notification.live_mode !== false) {
+    throw new HttpError(
+      500,
+      "CONFIGURATION_ERROR",
+      "MERCADO_PAGO_WEBHOOK_SECRET ausente. Sem esse secret, apenas notificacoes Sandbox podem ser aceitas.",
+    );
+  }
+
+  return {
+    signature: "sandbox-no-secret",
+    requestId: normalizeString(request.headers.get("x-request-id")),
+    timestamp: new Date().toISOString(),
+    manifest: null,
+    mode: "sandbox-bypass" as const,
   };
 }
 
@@ -682,20 +733,26 @@ Deno.serve(async (request) => {
     const supabaseUrl = requireEnv("SUPABASE_URL");
     const supabaseServiceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
     const mercadoPagoAccessToken = requireEnv("MERCADO_PAGO_ACCESS_TOKEN");
-    const mercadoPagoWebhookSecret = requireEnv("MERCADO_PAGO_WEBHOOK_SECRET");
+    const mercadoPagoWebhookSecret = getOptionalEnv("MERCADO_PAGO_WEBHOOK_SECRET");
 
     const supabase = createSupabaseServiceRoleClient(supabaseUrl, supabaseServiceRoleKey);
 
     const rawBody = await request.text();
     const notification = parseNotificationBody(rawBody);
+    const requestUrl = new URL(request.url);
+    const queryEntries = Object.fromEntries(requestUrl.searchParams.entries());
+    const queryDataId = requestUrl.searchParams.get("data.id");
+    const queryId = requestUrl.searchParams.get("id");
     const resourceId = resolveResourceId(request, notification);
     const notificationType = normalizeNotificationType(
       notification.type,
-      new URL(request.url).searchParams.get("type"),
+      requestUrl.searchParams.get("type"),
       notification.action,
     );
-    const signatureValidation = await validateWebhookSignature({
-      secret: mercadoPagoWebhookSecret,
+
+    const signatureValidation = await resolveWebhookValidation({
+      webhookSecret: mercadoPagoWebhookSecret,
+      notification,
       request,
       resourceId,
     });
@@ -703,7 +760,7 @@ Deno.serve(async (request) => {
     const externalEventId = buildExternalEventId(notification, resourceId, notificationType);
     const rawPayload = {
       body: notification,
-      query: Object.fromEntries(new URL(request.url).searchParams.entries()),
+      query: queryEntries,
       headers: {
         xSignature: request.headers.get("x-signature"),
         xRequestId: request.headers.get("x-request-id"),
@@ -711,6 +768,7 @@ Deno.serve(async (request) => {
       signatureValidation: {
         requestId: signatureValidation.requestId,
         timestamp: signatureValidation.timestamp,
+        mode: signatureValidation.mode,
       },
     };
 

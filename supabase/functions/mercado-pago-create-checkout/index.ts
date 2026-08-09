@@ -27,6 +27,10 @@ type SubscriptionPlanRow = {
   is_active: boolean;
 };
 
+const DEFAULT_PUBLIC_APP_URL = "https://meu-conograma-rouge.vercel.app";
+const MERCADO_PAGO_NOTIFICATION_URL =
+  "https://lcugbhlcojjuwazthtwc.supabase.co/functions/v1/mercado-pago-webhook";
+
 class HttpError extends Error {
   status: number;
   code: string;
@@ -116,6 +120,40 @@ function buildExternalReference(checkoutSessionId: string) {
   return `billing_checkout_session:${checkoutSessionId}`;
 }
 
+function getPublicAppBaseUrl() {
+  const configuredBaseUrl = Deno.env.get("PUBLIC_APP_URL")?.trim() || DEFAULT_PUBLIC_APP_URL;
+  const parsedBaseUrl = new URL(configuredBaseUrl);
+
+  if (parsedBaseUrl.protocol !== "https:") {
+    throw new HttpError(500, "CONFIGURATION_ERROR", "PUBLIC_APP_URL deve usar HTTPS.");
+  }
+
+  if (["localhost", "127.0.0.1"].includes(parsedBaseUrl.hostname)) {
+    throw new HttpError(500, "CONFIGURATION_ERROR", "PUBLIC_APP_URL deve apontar para uma URL publica.");
+  }
+
+  return parsedBaseUrl;
+}
+
+function buildMercadoPagoRedirectUrl(inputUrl: string) {
+  const requestUrl = new URL(inputUrl);
+  const publicAppBaseUrl = getPublicAppBaseUrl();
+  const redirectUrl = new URL(`${requestUrl.pathname}${requestUrl.search}${requestUrl.hash}`, publicAppBaseUrl);
+
+  return redirectUrl.toString();
+}
+
+function buildMercadoPagoBackUrls(successRedirectUrl: string, failureRedirectUrl: string) {
+  const successRedirect = buildMercadoPagoRedirectUrl(successRedirectUrl);
+  const failureRedirect = buildMercadoPagoRedirectUrl(failureRedirectUrl);
+
+  return {
+    success: successRedirect,
+    failure: failureRedirect,
+    pending: successRedirect,
+  } as const;
+}
+
 function createSupabaseUserClient(supabaseUrl: string, supabaseAnonKey: string, authHeader: string) {
   return createClient(supabaseUrl, supabaseAnonKey, {
     global: {
@@ -163,6 +201,32 @@ async function createMercadoPagoPreference({
   userId: string;
 }) {
   const descriptionSuffix = billingInterval === "annual" ? "anual" : "mensal";
+  const backUrls = buildMercadoPagoBackUrls(successUrl, cancelUrl);
+  const preferenceRequestBody = {
+    items: [
+      {
+        id: plan.id,
+        title: plan.name,
+        description: `Assinatura ${descriptionSuffix} do plano ${plan.name}`,
+        quantity: 1,
+        currency_id: "BRL",
+        unit_price: amount,
+      },
+    ],
+    payer: userEmail ? { email: userEmail } : undefined,
+    external_reference: externalReference,
+    back_urls: backUrls,
+    auto_return: "approved" as const,
+    notification_url: MERCADO_PAGO_NOTIFICATION_URL,
+    metadata: {
+      user_id: userId,
+      plan_id: plan.id,
+      plan_slug: plan.slug,
+      billing_interval: billingInterval,
+      checkout_session_id: checkoutSessionId,
+    },
+  };
+
   const response = await fetch("https://api.mercadopago.com/checkout/preferences", {
     method: "POST",
     headers: {
@@ -170,33 +234,7 @@ async function createMercadoPagoPreference({
       "Content-Type": "application/json",
       "X-Idempotency-Key": checkoutSessionId,
     },
-    body: JSON.stringify({
-      items: [
-        {
-          id: plan.id,
-          title: plan.name,
-          description: `Assinatura ${descriptionSuffix} do plano ${plan.name}`,
-          quantity: 1,
-          currency_id: "BRL",
-          unit_price: amount,
-        },
-      ],
-      payer: userEmail ? { email: userEmail } : undefined,
-      external_reference: externalReference,
-      auto_return: "approved",
-      back_urls: {
-        success: successUrl,
-        failure: cancelUrl,
-        pending: successUrl,
-      },
-      metadata: {
-        user_id: userId,
-        plan_id: plan.id,
-        plan_slug: plan.slug,
-        billing_interval: billingInterval,
-        checkout_session_id: checkoutSessionId,
-      },
-    }),
+    body: JSON.stringify(preferenceRequestBody),
   });
 
   const payload = await response.json().catch(() => null);
@@ -292,6 +330,7 @@ Deno.serve(async (request) => {
       .maybeSingle();
 
     if (planError) {
+      console.error("PLAN_ERROR", planError);
       throw new HttpError(500, "DATABASE_ERROR", "Falha ao carregar o plano de assinatura.", {
         cause: planError.message,
       });
