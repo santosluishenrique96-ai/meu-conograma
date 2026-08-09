@@ -31,4 +31,9 @@ supabase/.temp/
 *.njsproj
 *.sln
 *.sw?
-.env 
+.env
+
+# Local debug sessions, temporary env, and manual backups
+debug-*.md
+.tmp-*.env
+*.BKP-*
