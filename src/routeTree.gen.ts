@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AssinaturaRouteImport } from './routes/assinatura'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as CronogramaRouteImport } from './routes/cronograma'
+import { Route as DiarioRouteImport } from './routes/diario'
 import { Route as EvolucaoRouteImport } from './routes/evolucao'
 import { Route as FinanceiroRouteImport } from './routes/financeiro'
 import { Route as MinhaAssinaturaRouteImport } from './routes/minha-assinatura'
@@ -37,6 +38,11 @@ const AuthRoute = AuthRouteImport.update({
 const CronogramaRoute = CronogramaRouteImport.update({
   id: '/cronograma',
   path: '/cronograma',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DiarioRoute = DiarioRouteImport.update({
+  id: '/diario',
+  path: '/diario',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EvolucaoRoute = EvolucaoRouteImport.update({
@@ -70,6 +76,7 @@ export interface FileRoutesByFullPath {
   '/assinatura': typeof AssinaturaRoute
   '/auth': typeof AuthRoute
   '/cronograma': typeof CronogramaRoute
+  '/diario': typeof DiarioRoute
   '/evolucao': typeof EvolucaoRoute
   '/financeiro': typeof FinanceiroRoute
   '/minha-assinatura': typeof MinhaAssinaturaRoute
@@ -81,6 +88,7 @@ export interface FileRoutesByTo {
   '/assinatura': typeof AssinaturaRoute
   '/auth': typeof AuthRoute
   '/cronograma': typeof CronogramaRoute
+  '/diario': typeof DiarioRoute
   '/evolucao': typeof EvolucaoRoute
   '/financeiro': typeof FinanceiroRoute
   '/minha-assinatura': typeof MinhaAssinaturaRoute
@@ -93,6 +101,7 @@ export interface FileRoutesById {
   '/assinatura': typeof AssinaturaRoute
   '/auth': typeof AuthRoute
   '/cronograma': typeof CronogramaRoute
+  '/diario': typeof DiarioRoute
   '/evolucao': typeof EvolucaoRoute
   '/financeiro': typeof FinanceiroRoute
   '/minha-assinatura': typeof MinhaAssinaturaRoute
@@ -106,6 +115,7 @@ export interface FileRouteTypes {
     | '/assinatura'
     | '/auth'
     | '/cronograma'
+    | '/diario'
     | '/evolucao'
     | '/financeiro'
     | '/minha-assinatura'
@@ -117,6 +127,7 @@ export interface FileRouteTypes {
     | '/assinatura'
     | '/auth'
     | '/cronograma'
+    | '/diario'
     | '/evolucao'
     | '/financeiro'
     | '/minha-assinatura'
@@ -128,6 +139,7 @@ export interface FileRouteTypes {
     | '/assinatura'
     | '/auth'
     | '/cronograma'
+    | '/diario'
     | '/evolucao'
     | '/financeiro'
     | '/minha-assinatura'
@@ -140,6 +152,7 @@ export interface RootRouteChildren {
   AssinaturaRoute: typeof AssinaturaRoute
   AuthRoute: typeof AuthRoute
   CronogramaRoute: typeof CronogramaRoute
+  DiarioRoute: typeof DiarioRoute
   EvolucaoRoute: typeof EvolucaoRoute
   FinanceiroRoute: typeof FinanceiroRoute
   MinhaAssinaturaRoute: typeof MinhaAssinaturaRoute
@@ -175,6 +188,13 @@ declare module '@tanstack/react-router' {
       path: '/cronograma'
       fullPath: '/cronograma'
       preLoaderRoute: typeof CronogramaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/diario': {
+      id: '/diario'
+      path: '/diario'
+      fullPath: '/diario'
+      preLoaderRoute: typeof DiarioRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/evolucao': {
@@ -220,6 +240,7 @@ const rootRouteChildren: RootRouteChildren = {
   AssinaturaRoute: AssinaturaRoute,
   AuthRoute: AuthRoute,
   CronogramaRoute: CronogramaRoute,
+  DiarioRoute: DiarioRoute,
   EvolucaoRoute: EvolucaoRoute,
   FinanceiroRoute: FinanceiroRoute,
   MinhaAssinaturaRoute: MinhaAssinaturaRoute,

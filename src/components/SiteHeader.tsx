@@ -18,7 +18,11 @@ export function SiteHeader() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const userName = user?.user_metadata?.display_name || user?.email?.split("@")[0];
   const navItems = user
-    ? [...publicNavItems, { to: "/minha-assinatura", label: "Minha Assinatura" }]
+    ? [
+        ...publicNavItems,
+        { to: "/diario", label: "Diário" },
+        { to: "/minha-assinatura", label: "Minha Assinatura" },
+      ]
     : publicNavItems;
 
   useEffect(() => {
