@@ -1,19 +1,22 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../src/integrations/supabase/types";
 
-const RUN_INTEGRATION =
-  process.env.SUPABASE_SERVICE_ROLE_KEY &&
-  (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL) &&
-  (process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-    process.env.SUPABASE_PUBLISHABLE_KEY) &&
-  process.env.DIARY_TEST_NO_INTEGRATION !== "1";
-
 const SUPABASE_URL_FOR_CLIENT =
-  (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL) as string;
+  (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL) as string | undefined;
 const SUPABASE_KEY_FOR_CLIENT =
   (process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-    process.env.SUPABASE_PUBLISHABLE_KEY) as string;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY as string;
+    process.env.SUPABASE_PUBLISHABLE_KEY) as string | undefined;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY as
+  | string
+  | undefined;
+
+const hasSupabaseIntegrationEnv =
+  Boolean(SUPABASE_URL_FOR_CLIENT) &&
+  Boolean(SUPABASE_KEY_FOR_CLIENT) &&
+  Boolean(SUPABASE_SERVICE_ROLE_KEY);
+
+const RUN_INTEGRATION =
+  hasSupabaseIntegrationEnv && process.env.DIARY_TEST_NO_INTEGRATION !== "1";
 
 import {
   buildScheduleFocusSnapshot,
@@ -25,30 +28,44 @@ import {
   validateTreatments,
 } from "../src/services/diary";
 import type { DiaryTreatment } from "../src/types/diary";
-import { supabase as _anonClient } from "../src/integrations/supabase/client";
 
-let supabase: SupabaseClient<Database>;
-try {
-  void (_anonClient as unknown as { auth: unknown }).auth;
-  supabase = _anonClient as SupabaseClient<Database>;
-} catch {
-  supabase = createClient<Database>(
-    SUPABASE_URL_FOR_CLIENT,
-    SUPABASE_KEY_FOR_CLIENT,
-    {
-      auth: {
-        storage: undefined,
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    },
-  );
+let supabase: SupabaseClient<Database> | undefined;
+
+if (RUN_INTEGRATION) {
+  if (hasSupabaseIntegrationEnv) {
+    try {
+      // Import adia o side effect de inicialização só quando realmente há credenciais.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { supabase: _anonClient } = require("../src/integrations/supabase/client") as {
+        supabase: unknown;
+      };
+      void (_anonClient as { auth: unknown }).auth;
+      supabase = _anonClient as SupabaseClient<Database>;
+    } catch {
+      supabase = createClient<Database>(
+        SUPABASE_URL_FOR_CLIENT as string,
+        SUPABASE_KEY_FOR_CLIENT as string,
+        {
+          auth: {
+            storage: undefined,
+            persistSession: false,
+            autoRefreshToken: false,
+          },
+        },
+      );
+    }
+  }
 }
 
 function createSvc(): SupabaseClient<Database> {
-  return createClient<Database>(SUPABASE_URL_FOR_CLIENT, SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  if (!hasSupabaseIntegrationEnv) {
+    throw new Error("createSvc: credenciais Supabase não disponíveis");
+  }
+  return createClient<Database>(
+    SUPABASE_URL_FOR_CLIENT as string,
+    SUPABASE_SERVICE_ROLE_KEY as string,
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
 }
 
 const TEST_PASSWORD = `Tst!${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -104,9 +121,23 @@ async function cleanup(svc: SupabaseClient<Database>, userId: string) {
 }
 
 function runStaticTests() {
-  console.log("STATIC-1 normalizeISODate UTC");
-  const d1 = normalizeISODate("2026-08-09T23:59:59.999Z");
-  if (d1 !== "2026-08-09") throw new Error(`normalize err: ${d1}`);
+  console.log("STATIC-1 normalizeISODate data civil literal YYYY-MM-DD");
+  const d1a = normalizeISODate("2026-08-09");
+  if (d1a !== "2026-08-09") throw new Error(`normalize err literal: ${d1a}`);
+
+  console.log("STATIC-1B normalizeISODate Date LOCAL 23:59:59.999 (virada fuso local não desloca dia)");
+  const d1bDate = new Date(2026, 7, 9, 23, 59, 59, 999);
+  const d1b = normalizeISODate(d1bDate);
+  if (d1b !== "2026-08-09") throw new Error(`normalize err local 23:59: ${d1b}`);
+
+  console.log("STATIC-1C normalizeISODate REJEITA datetime strings com T/Z (contrato 2B)");
+  let threwDatetimeString = false;
+  try {
+    normalizeISODate("2026-08-09T23:59:59.999Z");
+  } catch {
+    threwDatetimeString = true;
+  }
+  if (!threwDatetimeString) throw new Error("datetime ISO com T/Z deveria ter sido rejeitado");
 
   console.log("STATIC-2 validateTreatments aceita domínio");
   validateTreatments(["Lavagem", "Hidratação", "Outro"] as DiaryTreatment[]);
@@ -138,29 +169,76 @@ function runStaticTests() {
   }
   if (!threw) throw new Error("resultado inválido não validado");
 
-  console.log("STATIC-6 buildScheduleFocusSnapshot null sem prefs");
-  const n = buildScheduleFocusSnapshot(null, new Date("2026-08-09T12:00:00Z"));
-  if (n !== null) throw new Error(`esperava null, recebi ${JSON.stringify(n)}`);
+  console.log("STATIC-6 buildScheduleFocusSnapshot prefs null usa DEFAULT do cronograma (domingo = Cuidado)");
+  const sunday = new Date("2026-08-09T12:00:00Z");
+  const n = buildScheduleFocusSnapshot(null, sunday);
+  if (!n) throw new Error(`esperava snapshot fallback, recebi null`);
+  if (n.weekday !== "sunday" || n.focus !== "Cuidado") {
+    throw new Error(`snapshot default domingo errado: ${JSON.stringify(n)}`);
+  }
+  if (n.hair_type !== undefined && n.hair_type !== null) {
+    throw new Error(`hair_type não deve existir no fallback default: ${JSON.stringify(n)}`);
+  }
+  if (n.goal !== undefined && n.goal !== null) {
+    throw new Error(`goal não deve existir no fallback default: ${JSON.stringify(n)}`);
+  }
 
   console.log("STATIC-7 buildScheduleFocusSnapshot domingo Nutrição cacheado");
-  const sunday = new Date("2026-08-09T12:00:00Z");
-  const prefs: {
+  const sundayPrefs: {
     sunday: string; monday: string; tuesday: string; wednesday: string; thursday: string;
     friday: string; saturday: string; hair_type: string | null; goal: string | null;
-    created_at: string; updated_at: string; id: string; user_id: string;
   } = {
-    created_at: "", updated_at: "", id: "", user_id: "",
     monday: "Hidratação", tuesday: "Nutrição", wednesday: "Cuidado",
     thursday: "Reconstrução", friday: "Umectação", saturday: "Finalização", sunday: "Nutrição",
     hair_type: "Cacheado", goal: "Crescimento sem quebra",
   };
-  const snap = buildScheduleFocusSnapshot(prefs, sunday);
+  const snap = buildScheduleFocusSnapshot(sundayPrefs, sunday);
   if (!snap) throw new Error("snap inexistente");
   if (snap.focus !== "Nutrição" || snap.weekday !== "sunday") {
     throw new Error(`snap focus/weekday errado: ${JSON.stringify(snap)}`);
   }
   if (snap.hair_type !== "Cacheado" || !snap.goal?.includes("Crescimento")) {
     throw new Error(`snap extras errado: ${JSON.stringify(snap)}`);
+  }
+
+  console.log("STATIC-8 buildScheduleFocusSnapshot Monday = Reconstrução");
+  const monday = new Date("2026-08-10T12:00:00Z");
+  const mondayPrefs = {
+    monday: "Reconstrução",
+    tuesday: "Descanso",
+    wednesday: "Nutrição",
+    thursday: "Descanso",
+    friday: "Hidratação",
+    saturday: "Cuidado",
+    sunday: "Umectação",
+    hair_type: null as string | null,
+    goal: null as string | null,
+  };
+  const snapMonday = buildScheduleFocusSnapshot(mondayPrefs, monday);
+  if (!snapMonday) throw new Error("monday snap null");
+  if (snapMonday.weekday !== "monday" || snapMonday.focus !== "Reconstrução") {
+    throw new Error(`snap monday errado: ${JSON.stringify(snapMonday)}`);
+  }
+  if (snapMonday.hair_type !== undefined && snapMonday.hair_type !== null) {
+    throw new Error("hair_type deve estar ausente/null");
+  }
+
+  console.log("STATIC-9 buildScheduleFocusSnapshot fallback default por todos os dias úteis básicos");
+  const mapDayToExpected = [
+    { date: new Date("2026-08-09T12:00:00Z"), w: "sunday", f: "Cuidado" },
+    { date: new Date("2026-08-10T12:00:00Z"), w: "monday", f: "Hidratação" },
+    { date: new Date("2026-08-12T12:00:00Z"), w: "wednesday", f: "Nutrição" },
+    { date: new Date("2026-08-15T12:00:00Z"), w: "saturday", f: "Reconstrução" },
+    { date: new Date("2026-08-11T12:00:00Z"), w: "tuesday", f: "Descanso" },
+    { date: new Date("2026-08-13T12:00:00Z"), w: "thursday", f: "Descanso" },
+    { date: new Date("2026-08-14T12:00:00Z"), w: "friday", f: "Hidratação" },
+  ] as const;
+  for (const c of mapDayToExpected) {
+    const s = buildScheduleFocusSnapshot(null, c.date);
+    if (!s) throw new Error(`snap fallback null para ${c.w}`);
+    if (s.weekday !== c.w || s.focus !== c.f) {
+      throw new Error(`snap fallback ${c.w} esperava ${c.f} recebi ${JSON.stringify(s)}`);
+    }
   }
 }
 
@@ -263,12 +341,24 @@ async function runIntegrationTests(userId: string) {
   const byDate = await getDiaryEntryByDate("2026-08-10");
   if (!byDate || byDate.id !== day2.id) throw new Error("busca por data quebrada");
 
-  console.log("INT-9 snapshot NULL quando não há schedule_preferences");
-  if (created.scheduled_focus_snapshot !== null) {
-    throw new Error(`snapshot não era null: ${JSON.stringify(created.scheduled_focus_snapshot)}`);
+  console.log("INT-9 snapshot FALLBACK DEFAULT quando não há schedule_preferences (FREE / sem linha)");
+  {
+    const s = created.scheduled_focus_snapshot as unknown as {
+      focus: string; weekday: string; hair_type?: string | null; goal?: string | null;
+    } | null;
+    if (!s) {
+      throw new Error(`snapshot estava null, devia ter DEFAULT fallback: ${JSON.stringify(created.scheduled_focus_snapshot)}`);
+    }
+    if (s.focus !== "Cuidado" || s.weekday !== "sunday") {
+      throw new Error(`snapshot default domingo devia ser Cuidado: ${JSON.stringify(s)}`);
+    }
+    // default não tem hair_type/goal:
+    if (s.hair_type) throw new Error(`hair_type indevido no default: ${JSON.stringify(s)}`);
+    if (s.goal) throw new Error(`goal indevido no default: ${JSON.stringify(s)}`);
   }
+  const snapshotCriacaoOriginal = created.scheduled_focus_snapshot;
 
-  console.log("INT-10 insere schedule_preferences (service role) + feature acesso → snapshot JSONB gravado (objeto)");
+  console.log("INT-10 insere schedule_preferences (service role). UPDATE não altera snapshot histórico. INSERT NOVA entrada reflete cronograma atual.");
   {
     const up = await svc
       .from("schedule_preferences")
@@ -289,24 +379,139 @@ async function runIntegrationTests(userId: string) {
       );
     if (up.error) throw up.error;
   }
-  const refreshed = await upsertDiaryEntry("2026-08-09", { note: "com schedule" });
-  if (!refreshed.scheduled_focus_snapshot) throw new Error("snapshot não gravado");
-  const r = refreshed.scheduled_focus_snapshot as unknown as {
-    focus: string; weekday: string; hair_type?: string; goal?: string;
-  };
-  if (r.focus !== "Nutrição" || r.weekday !== "sunday") {
-    throw new Error(`snapshot focus/weekday errado: ${JSON.stringify(r)}`);
+
+  // A) UPDATE note de entry existente: snapshot deve PERMANECER IGUAL ao original
+  const refreshed = await upsertDiaryEntry("2026-08-09", { note: "atualizado depois de schedule salvo" });
+  if (refreshed.id !== created.id) throw new Error("id mudou no update");
+  if (refreshed.scheduled_focus_snapshot !== snapshotCriacaoOriginal) {
+    // comparação profunda se for objeto
+    const before = JSON.stringify(snapshotCriacaoOriginal);
+    const after = JSON.stringify(refreshed.scheduled_focus_snapshot);
+    if (before !== after) {
+      throw new Error(`UPDATE sobrescreveu snapshot histórico! Antes: ${before}  Depois: ${after}`);
+    }
   }
-  if (r.hair_type !== "Cacheado" || !r.goal?.includes("Crescimento")) {
-    throw new Error(`snapshot extras errado: ${JSON.stringify(r)}`);
+  {
+    const r = refreshed.scheduled_focus_snapshot as unknown as { focus: string; weekday: string; hair_type?: string; goal?: string };
+    // Snapshot histórico continua Cuidado (fallback quando foi criado, apesar de domingo agora ser Nutrição).
+    if (r.focus !== "Cuidado" || r.weekday !== "sunday") {
+      throw new Error(`snapshot histórico foi alterado após UPDATE: ${JSON.stringify(r)}`);
+    }
+  }
+  // Campos parciais preservados
+  if (refreshed.definition !== 5) throw new Error("definition caiu após update note");
+  if (refreshed.treatments.join(",") !== "Lavagem,Hidratação") throw new Error("treatments caiu após update note");
+  if (!refreshed.note?.includes("atualizado depois de schedule salvo")) throw new Error("note não atualizou");
+
+  // B) INSERT de nova entrada (domingo 16) → novo snapshot reflete o cronograma ATUAL (domingo = Nutrição, Cacheado, Crescimento)
+  console.log("INT-11 INSERT novo domingo (16/08) usa cronograma atualizado");
+  const day16 = await upsertDiaryEntry("2026-08-16", {
+    treatments: ["Nutrição", "Umectação"], perceived_result: "Muito bom", shine: 5,
+  });
+  if (day16.entry_date !== "2026-08-16") throw new Error("entry_date errado dia16");
+  {
+    const snap = day16.scheduled_focus_snapshot as unknown as { focus: string; weekday: string; hair_type?: string; goal?: string };
+    if (!snap) throw new Error(`novo snapshot não foi gravado`);
+    if (snap.weekday !== "sunday" || snap.focus !== "Nutrição") {
+      throw new Error(`snapshot dia 16 devia ser domingo Nutrição: ${JSON.stringify(snap)}`);
+    }
+    if (snap.hair_type !== "Cacheado" || !snap.goal?.includes("Crescimento")) {
+      throw new Error(`snapshot dia 16 não incluiu hair_type/goal: ${JSON.stringify(snap)}`);
+    }
   }
 
-  console.log("INT-11 edição não sobrescreve campos silenciosos");
-  if (refreshed.definition !== 5) throw new Error("definition caiu");
-  if (refreshed.treatments.join(",") !== "Lavagem,Hidratação") throw new Error("treatments caiu");
-  if (!refreshed.note?.includes("com schedule")) throw new Error("note não atualizou");
+  console.log("INT-12 UPDATE treatments (sem mudar dia) não altera snapshot histórico");
+  {
+    const before = JSON.stringify(day16.scheduled_focus_snapshot);
+    const edited = await upsertDiaryEntry("2026-08-16", { treatments: ["Nutrição", "Finalização"], definition: 4 });
+    const after = JSON.stringify(edited.scheduled_focus_snapshot);
+    if (before !== after) throw new Error(`UPDATE treatments alterou snapshot! Antes:${before}  Depois:${after}`);
+    if (edited.treatments.join(",") !== "Nutrição,Finalização") throw new Error("treatments não atualizaram");
+    if (edited.definition !== 4) throw new Error("definition não atualizou");
+  }
 
-  console.log("INT-12 service bloqueia treatment fora do domínio (não chega ao banco)");
+  console.log("INT-13 ALTERAR CRONOGRAMA DEPOIS: domingo = Cuidado → snapshot histórico não muda");
+  {
+    const up2 = await svc
+      .from("schedule_preferences")
+      .upsert(
+        {
+          user_id: userId,
+          hair_type: "Ondulado",
+          goal: "Reduzir frizz",
+          monday: "Hidratação", tuesday: "Descanso", wednesday: "Nutrição",
+          thursday: "Descanso", friday: "Hidratação", saturday: "Reconstrução", sunday: "Cuidado",
+        },
+        { onConflict: "user_id" },
+      );
+    if (up2.error) throw up2.error;
+
+    // editar note do day16 (que tem domingo Nutrição histórico)
+    const beforeSnap = JSON.stringify(day16.scheduled_focus_snapshot);
+    const editedDay16 = await upsertDiaryEntry("2026-08-16", { note: "registro do dia 16 atualizado depois mudança cronograma" });
+    const afterSnap = JSON.stringify(editedDay16.scheduled_focus_snapshot);
+    if (beforeSnap !== afterSnap) {
+      throw new Error(`ALTERAR cronograma alterou snapshot histórico dia 16! Antes:${beforeSnap} Depois:${afterSnap}`);
+    }
+    const snap = editedDay16.scheduled_focus_snapshot as unknown as { focus: string; weekday: string; hair_type?: string; goal?: string };
+    // snapshot histórico continua Nutrição/Cacheado/Crescimento
+    if (snap.focus !== "Nutrição" || snap.hair_type !== "Cacheado" || !snap.goal?.includes("Crescimento")) {
+      throw new Error(`snap histórico não preservado: ${JSON.stringify(snap)}`);
+    }
+    if (!editedDay16.note?.includes("atualizado depois mudança cronograma")) throw new Error("note não atualizou");
+  }
+
+  console.log("INT-14 INSERT NOVA entrada após mudança cronograma reflete novo plano");
+  // domingo 23/08
+  const day23 = await upsertDiaryEntry("2026-08-23", {
+    treatments: ["Lavagem", "Cuidado"], perceived_result: "Bom", breakage: 2,
+  });
+  {
+    const snap = day23.scheduled_focus_snapshot as unknown as { focus: string; weekday: string; hair_type?: string; goal?: string };
+    if (!snap) throw new Error("snap dia23 não gravado");
+    // Novo cronograma: domingo = Cuidado; hair Ondulado, goal Reduzir frizz
+    if (snap.weekday !== "sunday" || snap.focus !== "Cuidado") {
+      throw new Error(`snap dia23 esperava domingo=Cuidado: ${JSON.stringify(snap)}`);
+    }
+    if (snap.hair_type !== "Ondulado" || !snap.goal?.includes("Reduzir frizz")) {
+      throw new Error(`snap dia23 não incluiu hair_type/goal NOVOS: ${JSON.stringify(snap)}`);
+    }
+  }
+
+  console.log("INT-15 snapshot NULL histórico não é preenchido retroativamente em UPDATE");
+  {
+    const svcEntry = await svc
+      .from("diary_entries")
+      .insert({
+        user_id: userId,
+        entry_date: "2026-08-17",
+        treatments: ["Finalização"],
+        note: "registro sem snapshot (via service)",
+      })
+      .select("*")
+      .single();
+    if (svcEntry.error) throw svcEntry.error;
+    if (svcEntry.data.scheduled_focus_snapshot !== null) {
+      // forçar via service para null para garantir teste
+      const forced = await svc
+        .from("diary_entries")
+        .update({ scheduled_focus_snapshot: null as unknown as never })
+        .eq("id", svcEntry.data.id)
+        .eq("user_id", userId)
+        .select("*")
+        .single();
+      if (forced.error) throw forced.error;
+    }
+
+    const edited = await upsertDiaryEntry("2026-08-17", { note: "editado por usuário sem snapshot antigo", shine: 3 });
+    if (edited.scheduled_focus_snapshot !== null) {
+      throw new Error(`UPDATE Preencheu snapshot NULL retroativamente: ${JSON.stringify(edited.scheduled_focus_snapshot)}`);
+    }
+    if (!edited.note?.includes("editado por usuário sem snapshot antigo")) throw new Error("note não atualizou H");
+    if (edited.shine !== 3) throw new Error("shine não atualizou H");
+  }
+
+  console.log("INT-16 service bloqueia treatment fora do domínio (não chega ao banco)");
   let threw = false;
   try {
     await upsertDiaryEntry("2026-08-11", {

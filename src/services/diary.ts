@@ -14,6 +14,33 @@ import type { Tables } from "@/integrations/supabase/types";
 
 type SchedulePreferencesRow = Tables<"schedule_preferences">;
 
+type ScheduleSnapshotSource = Pick<
+  SchedulePreferencesRow,
+  | "hair_type"
+  | "goal"
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday"
+  | "sunday"
+>;
+
+// Dívida técnica (Fase futura): deduplicar este fallback com os DEFAULT_PREFS de
+// src/routes/cronograma.tsx, mantendo uma única fonte de defaults canônicos.
+const DEFAULT_SCHEDULE_PREFS_FALLBACK: ScheduleSnapshotSource = {
+  hair_type: null,
+  goal: null,
+  monday: "Hidratação",
+  tuesday: "Descanso",
+  wednesday: "Nutrição",
+  thursday: "Descanso",
+  friday: "Hidratação",
+  saturday: "Reconstrução",
+  sunday: "Cuidado",
+};
+
 const ALLOWED_TREATMENTS = new Set<string>(DIARY_TREATMENTS);
 const ALLOWED_RESULTS = new Set<string>(DIARY_PERCEIVED_RESULTS);
 
@@ -129,10 +156,10 @@ export function validatePayloadShape(payload: DiaryEntryPayloadShape): DiaryEntr
 }
 
 export function buildScheduleFocusSnapshot(
-  prefs: SchedulePreferencesRow | null,
+  prefs: ScheduleSnapshotSource | null,
   date: Date,
 ): ScheduleFocusSnapshot | null {
-  if (!prefs) return null;
+  const effective = prefs ?? DEFAULT_SCHEDULE_PREFS_FALLBACK;
   const weekdayIndex = date.getDay();
   const weekdayKeys = [
     "sunday",
@@ -144,10 +171,10 @@ export function buildScheduleFocusSnapshot(
     "saturday",
   ] as const;
   const key = weekdayKeys[weekdayIndex];
-  const focus = ((prefs as Record<string, unknown>)[key] as string | null | undefined) ?? null;
+  const focus = ((effective as Record<string, unknown>)[key] as string | null | undefined) ?? null;
   if (!focus || typeof focus !== "string") return null;
-  const hairType = prefs.hair_type ?? null;
-  const goal = prefs.goal ?? null;
+  const hairType = effective.hair_type ?? null;
+  const goal = effective.goal ?? null;
   const snapshot: ScheduleFocusSnapshot = { weekday: key, focus };
   if (hairType) snapshot.hair_type = hairType;
   if (goal) snapshot.goal = goal;
@@ -211,6 +238,36 @@ export async function upsertDiaryEntry(
   const userId = await resolveAuthenticatedUserIdOrThrow();
   const validated = validatePayloadShape(payload);
   const entryDate = normalizeISODate(date);
+  const existingEntry = await getDiaryEntryByDate(entryDate);
+
+  if (existingEntry) {
+    const updatePayload: DiaryEntryUpdate = {};
+    if (validated.treatments !== undefined) updatePayload.treatments = validated.treatments;
+    if (validated.perceived_result !== undefined)
+      updatePayload.perceived_result = validated.perceived_result;
+    if (validated.frizz !== undefined) updatePayload.frizz = validated.frizz;
+    if (validated.dryness !== undefined) updatePayload.dryness = validated.dryness;
+    if (validated.oiliness !== undefined) updatePayload.oiliness = validated.oiliness;
+    if (validated.definition !== undefined) updatePayload.definition = validated.definition;
+    if (validated.shine !== undefined) updatePayload.shine = validated.shine;
+    if (validated.breakage !== undefined) updatePayload.breakage = validated.breakage;
+    if (validated.note !== undefined) updatePayload.note = validated.note;
+    if (validated.evolution_photo_id !== undefined)
+      updatePayload.evolution_photo_id = validated.evolution_photo_id;
+    // scheduled_focus_snapshot permanece preservado: NÃO adicionar em updatePayload,
+    // pois o snapshot histórico deve ser imutável (definido apenas no INSERT).
+
+    const { data, error } = await supabase
+      .from("diary_entries")
+      .update(updatePayload)
+      .eq("id", existingEntry.id)
+      .eq("user_id", userId)
+      .select("*")
+      .single();
+    if (error) throw error;
+    return data as DiaryEntryRow;
+  }
+
   let dateForSnapshot: Date;
   if (typeof date === "string") {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
@@ -233,38 +290,6 @@ export async function upsertDiaryEntry(
 
   const schedulePrefs = await getSchedulePreferencesForUser(userId);
   const scheduledFocusSnapshot = buildScheduleFocusSnapshot(schedulePrefs, dateForSnapshot);
-
-  const existingEntry = await getDiaryEntryByDate(entryDate);
-
-  if (existingEntry) {
-    const updatePayload: DiaryEntryUpdate = {};
-    if (validated.treatments !== undefined) updatePayload.treatments = validated.treatments;
-    if (validated.perceived_result !== undefined)
-      updatePayload.perceived_result = validated.perceived_result;
-    if (validated.frizz !== undefined) updatePayload.frizz = validated.frizz;
-    if (validated.dryness !== undefined) updatePayload.dryness = validated.dryness;
-    if (validated.oiliness !== undefined) updatePayload.oiliness = validated.oiliness;
-    if (validated.definition !== undefined) updatePayload.definition = validated.definition;
-    if (validated.shine !== undefined) updatePayload.shine = validated.shine;
-    if (validated.breakage !== undefined) updatePayload.breakage = validated.breakage;
-    if (validated.note !== undefined) updatePayload.note = validated.note;
-    if (validated.evolution_photo_id !== undefined)
-      updatePayload.evolution_photo_id = validated.evolution_photo_id;
-    if (scheduledFocusSnapshot !== null) {
-      updatePayload.scheduled_focus_snapshot =
-        scheduledFocusSnapshot as unknown as import("@/integrations/supabase/types").Json;
-    }
-
-    const { data, error } = await supabase
-      .from("diary_entries")
-      .update(updatePayload)
-      .eq("id", existingEntry.id)
-      .eq("user_id", userId)
-      .select("*")
-      .single();
-    if (error) throw error;
-    return data as DiaryEntryRow;
-  }
 
   const insertPayload: DiaryEntryInsert = {
     user_id: userId,
@@ -295,8 +320,9 @@ export async function upsertDiaryEntry(
       typeof error.message === "string" &&
       error.message.includes("diary_entries_user_entry_unique")
     ) {
-      const retry = await getDiaryEntryByDate(entryDate);
-      if (!retry) throw error;
+      // Em caso de corrida: a entrada foi criada por outra operação.
+      // Refazer a chamada: existingEntry existirá, cairá no UPDATE e preservará
+      // o snapshot histórico do INSERT criado pela corrida (nunca sobrescreve).
       return upsertDiaryEntry(entryDate, payload);
     }
     throw error;
