@@ -22,6 +22,7 @@ import type { LucideIcon } from "lucide-react";
 import { FeatureAccessGuard } from "@/components/feature-access-guard";
 import { SiteHeader } from "@/components/SiteHeader";
 import { useAuth } from "@/hooks/use-auth";
+import { useDiaryEntriesInRange } from "@/hooks/use-diary";
 import { useFeatureAccess } from "@/hooks/use-subscription-permissions";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -501,6 +502,38 @@ function parseFocusType(value: string): FocusType {
   return value in FOCUS_TYPES ? (value as FocusType) : "Cuidado";
 }
 
+const CRON_CIVIL_DATE_RE = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+function toCivilKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function isCivilKey(raw: unknown): raw is string {
+  return typeof raw === "string" && CRON_CIVIL_DATE_RE.test(raw);
+}
+
+function addDaysLocal(date: Date, n: number): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0, 0);
+  d.setDate(d.getDate() + n);
+  return d;
+}
+
+function startOfWeekMonday(today: Date): Date {
+  const weekday = today.getDay();
+  const delta = weekday === 0 ? -6 : 1 - weekday;
+  return addDaysLocal(today, delta);
+}
+
+type WeekCardDate = {
+  date: Date;
+  key: string;
+  isToday: boolean;
+  isFuture: boolean;
+};
+
 function CronogramaPage() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
@@ -552,6 +585,49 @@ function CronogramaPage() {
   );
 
   const answeredQuestions = Object.keys(quizAnswers).length;
+
+  const todayLocal = useMemo(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0);
+  }, []);
+
+  const todayKey = toCivilKey(todayLocal);
+
+  const weekDates = useMemo<WeekCardDate[]>(() => {
+    const monday = startOfWeekMonday(todayLocal);
+    const cards: WeekCardDate[] = [];
+    for (let i = 0; i < 7; i++) {
+      const date = addDaysLocal(monday, i);
+      const key = toCivilKey(date);
+      cards.push({
+        date,
+        key,
+        isToday: key === todayKey,
+        isFuture: key > todayKey,
+      });
+    }
+    return cards;
+  }, [todayLocal, todayKey]);
+
+  const mondayKey = weekDates[0]?.key ?? todayKey;
+
+  const { data: weekRows } = useDiaryEntriesInRange(
+    { from: mondayKey, to: todayKey },
+    Boolean(user),
+  );
+
+  const entriesByDate = useMemo(() => {
+    const map = new Map<string, unknown>();
+    if (Array.isArray(weekRows)) {
+      for (const row of weekRows) {
+        const r = row as { entry_date?: unknown };
+        if (isCivilKey(r.entry_date)) {
+          map.set(r.entry_date, row);
+        }
+      }
+    }
+    return map;
+  }, [weekRows]);
 
   const savePrefs = async (nextPrefs: Prefs = prefs) => {
     if (!user) {
@@ -687,9 +763,9 @@ function CronogramaPage() {
                   Descubra o que seu cabelo está pedindo agora
                 </h2>
                 <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                  Marque os sinais que você percebe e responda ao teste capilar. A tela interpreta os
-                  sintomas, explica o motivo e sugere um cronograma mais próximo do ideal para os seus
-                  fios.
+                  Marque os sinais que você percebe e responda ao teste capilar. A tela interpreta
+                  os sintomas, explica o motivo e sugere um cronograma mais próximo do ideal para os
+                  seus fios.
                 </p>
               </div>
               <div className="rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm">
@@ -1001,80 +1077,197 @@ function CronogramaPage() {
         {/* Content */}
         <div className="mt-8">
           {tab === "diario" && (
-            <div className="grid gap-5 md:grid-cols-3">
-              {diario.map((d) => (
-                <div
-                  key={d.time}
-                  className="rounded-3xl bg-gradient-card border border-border p-6 transition-smooth hover:border-primary/50"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-primary shadow-glow">
-                      <d.icon className="h-5 w-5 text-primary-foreground" />
-                    </div>
-                    <div>
-                      <div className="text-xs uppercase tracking-wider text-muted-foreground">
-                        {d.time}
+            <>
+              <div className="grid gap-5 md:grid-cols-3">
+                {diario.map((d) => (
+                  <div
+                    key={d.time}
+                    className="rounded-3xl bg-gradient-card border border-border p-6 transition-smooth hover:border-primary/50"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-primary shadow-glow">
+                        <d.icon className="h-5 w-5 text-primary-foreground" />
                       </div>
-                      <div className="font-bold">{d.title}</div>
+                      <div>
+                        <div className="text-xs uppercase tracking-wider text-muted-foreground">
+                          {d.time}
+                        </div>
+                        <div className="font-bold">{d.title}</div>
+                      </div>
                     </div>
+                    <ul className="mt-5 space-y-2">
+                      {d.steps.map((s) => {
+                        const k = `d-${d.time}-${s}`;
+                        const isDone = done.has(k);
+                        return (
+                          <li key={s}>
+                            <button
+                              onClick={() => toggle(k)}
+                              className="flex w-full items-center gap-3 text-left text-sm transition-smooth hover:text-foreground"
+                            >
+                              <span
+                                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-smooth ${isDone ? "bg-gradient-primary border-transparent" : "border-border"}`}
+                              >
+                                {isDone && (
+                                  <Check className="h-3.5 w-3.5 text-primary-foreground" />
+                                )}
+                              </span>
+                              <span
+                                className={
+                                  isDone
+                                    ? "line-through text-muted-foreground"
+                                    : "text-foreground/90"
+                                }
+                              >
+                                {s}
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
                   </div>
-                  <ul className="mt-5 space-y-2">
-                    {d.steps.map((s) => {
-                      const k = `d-${d.time}-${s}`;
-                      const isDone = done.has(k);
-                      return (
-                        <li key={s}>
-                          <button
-                            onClick={() => toggle(k)}
-                            className="flex w-full items-center gap-3 text-left text-sm transition-smooth hover:text-foreground"
-                          >
-                            <span
-                              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-smooth ${isDone ? "bg-gradient-primary border-transparent" : "border-border"}`}
-                            >
-                              {isDone && <Check className="h-3.5 w-3.5 text-primary-foreground" />}
-                            </span>
-                            <span
-                              className={
-                                isDone ? "line-through text-muted-foreground" : "text-foreground/90"
-                              }
-                            >
-                              {s}
-                            </span>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
+                ))}
+              </div>
+
+              <div className="mt-8 rounded-3xl border border-primary/30 bg-gradient-card p-6 md:p-8">
+                <div className="flex flex-col items-start gap-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <div className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-primary">
+                      <CalendarIcon className="h-3.5 w-3.5" /> Registro de hoje
+                    </div>
+                    <h3 className="mt-3 text-xl font-black md:text-2xl">
+                      {entriesByDate.has(todayKey)
+                        ? "Hoje já está registrado no diário"
+                        : "Marque o que foi realizado hoje no diário"}
+                    </h3>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {entriesByDate.has(todayKey)
+                        ? "Clique em ver registro para editar percepções, tratamentos e foto da evolução do dia."
+                        : "Abra o diário de hoje para salvar os tratamentos realizados e registrar sua percepção capilar."}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    {entriesByDate.has(todayKey) ? (
+                      <>
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-600">
+                          <Check className="h-4 w-4" /> Registrado
+                        </span>
+                        <Link
+                          to="/diario"
+                          search={{ date: todayKey }}
+                          className="inline-flex items-center gap-2 rounded-full bg-gradient-primary px-6 py-2.5 text-sm font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105"
+                        >
+                          Ver registro <Sparkles className="h-4 w-4" />
+                        </Link>
+                      </>
+                    ) : (
+                      <Link
+                        to="/diario"
+                        search={{ date: todayKey }}
+                        className="inline-flex items-center gap-2 rounded-full bg-gradient-primary px-6 py-2.5 text-sm font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105"
+                      >
+                        Registrar no Diário <Sparkles className="h-4 w-4" />
+                      </Link>
+                    )}
+                  </div>
                 </div>
-              ))}
-            </div>
+              </div>
+            </>
           )}
 
           {tab === "semanal" && (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {DAYS.map((d) => {
+              {DAYS.map((d, idx) => {
+                const weekCard = weekDates[idx];
+                const cardKey = weekCard?.key ?? todayKey;
+                const isCardToday = weekCard?.isToday ?? false;
+                const isCardFuture = weekCard?.isFuture ?? false;
+                const hasEntry = entriesByDate.has(cardKey);
                 const type = prefs[d.key] || "Cuidado";
                 const meta = FOCUS_TYPES[type] || FOCUS_TYPES["Cuidado"];
                 const Icon = meta.icon;
                 const k = `s-${d.key}`;
                 const isDone = done.has(k);
                 return (
-                  <button
+                  <div
                     key={d.key}
-                    onClick={() => toggle(k)}
-                    className={`text-left rounded-3xl bg-gradient-card border p-6 transition-smooth hover:-translate-y-1 ${isDone ? "border-primary shadow-glow" : "border-border hover:border-primary/50"}`}
+                    className={`text-left rounded-3xl bg-gradient-card border p-6 transition-smooth hover:-translate-y-1 ${
+                      isDone
+                        ? "border-primary shadow-glow"
+                        : isCardToday
+                          ? "border-primary/60 shadow-glow"
+                          : "border-border hover:border-primary/50"
+                    }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <div
-                        className={`inline-flex items-center gap-2 rounded-full bg-gradient-to-r ${meta.color} px-3 py-1 text-xs font-bold text-background`}
-                      >
-                        <Icon className="h-3.5 w-3.5" /> {type}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex flex-col gap-2">
+                        <div
+                          className={`inline-flex items-center gap-2 rounded-full bg-gradient-to-r ${meta.color} px-3 py-1 text-xs font-bold text-background`}
+                        >
+                          <Icon className="h-3.5 w-3.5" /> {type}
+                        </div>
+                        {isCardToday && (
+                          <span className="inline-flex w-max items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-primary">
+                            Hoje
+                          </span>
+                        )}
                       </div>
-                      {isDone && <Check className="h-5 w-5 text-primary" />}
+                      <button
+                        type="button"
+                        aria-label={
+                          isDone ? "Desmarcar feito localmente" : "Marcar como feito localmente"
+                        }
+                        onClick={() => toggle(k)}
+                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border transition-smooth ${
+                          isDone
+                            ? "bg-gradient-primary border-transparent shadow-glow"
+                            : "border-border hover:border-primary/60"
+                        }`}
+                      >
+                        {isDone && <Check className="h-4 w-4 text-primary-foreground" />}
+                      </button>
                     </div>
-                    <div className="mt-4 text-2xl font-black">{d.label}</div>
+                    <div className="mt-4 flex items-baseline gap-3">
+                      <div className="text-2xl font-black">{d.label}</div>
+                      {weekCard && (
+                        <div className="text-xs font-semibold text-muted-foreground">
+                          {weekCard.date.getDate()}/
+                          {String(weekCard.date.getMonth() + 1).padStart(2, "0")}
+                        </div>
+                      )}
+                    </div>
                     <p className="mt-2 text-sm text-muted-foreground">{meta.desc}</p>
-                  </button>
+
+                    <div className="mt-5 border-t border-border/60 pt-4">
+                      {isCardFuture ? (
+                        <span className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-border bg-card/50 px-4 py-2 text-sm font-bold text-muted-foreground">
+                          Ainda não disponível
+                        </span>
+                      ) : hasEntry ? (
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-bold text-emerald-600">
+                            <Check className="h-3.5 w-3.5" /> Registrado
+                          </span>
+                          <Link
+                            to="/diario"
+                            search={{ date: cardKey }}
+                            className="text-sm font-bold text-primary transition-smooth hover:underline underline-offset-4"
+                          >
+                            Ver registro →
+                          </Link>
+                        </div>
+                      ) : (
+                        <Link
+                          to="/diario"
+                          search={{ date: cardKey }}
+                          className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-4 py-2 text-sm font-bold text-primary transition-smooth hover:bg-primary/20"
+                        >
+                          Registrar no Diário →
+                        </Link>
+                      )}
+                    </div>
+                  </div>
                 );
               })}
             </div>

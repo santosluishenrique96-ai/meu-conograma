@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getDiaryEntryByDate,
   listDiaryEntries,
+  listDiaryEntriesInRange,
   upsertDiaryEntry,
   type DiaryEntryPayloadShape,
 } from "@/services/diary";
@@ -42,6 +43,23 @@ export function useDiaryEntriesList(
   });
 }
 
+const CIVIL_RANGE_RE = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+export function useDiaryEntriesInRange(
+  { from, to }: { from?: string; to?: string },
+  enabled = true,
+) {
+  const fromOk = typeof from === "string" && CIVIL_RANGE_RE.test(from);
+  const toOk = typeof to === "string" && CIVIL_RANGE_RE.test(to);
+  const orderOk = fromOk && toOk && from! <= to!;
+  return useQuery({
+    queryKey: ["diary", "range", from ?? "", to ?? ""],
+    queryFn: () => listDiaryEntriesInRange(from!, to!),
+    enabled: enabled && fromOk && toOk && orderOk,
+    staleTime: 60_000,
+  });
+}
+
 export function useDiaryUpsertEntry() {
   const queryClient = useQueryClient();
 
@@ -55,6 +73,7 @@ export function useDiaryUpsertEntry() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["diary", "entry", dateKey] }),
         queryClient.invalidateQueries({ queryKey: ["diary", "list"] }),
+        queryClient.invalidateQueries({ queryKey: ["diary", "range"] }),
       ]);
       toast.success("Registro salvo com sucesso!");
     },

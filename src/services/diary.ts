@@ -231,6 +231,44 @@ export async function listDiaryEntries(limit: number, offset?: number): Promise<
   return (data ?? []) as DiaryEntryRow[];
 }
 
+const CIVIL_DATE_RANGE_RE = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+function validateCivilKeyOrThrow(raw: unknown, label: string): string {
+  if (typeof raw !== "string") {
+    throw new Error(`${label} precisa ser uma string de data civil YYYY-MM-DD`);
+  }
+  const match = raw.match(CIVIL_DATE_RANGE_RE);
+  if (!match) {
+    throw new Error(`${label} precisa ser uma data civil no formato YYYY-MM-DD`);
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  if (day > daysInMonth) {
+    throw new Error(`${label} possui dia inválido para o mês/ano informado`);
+  }
+  return raw;
+}
+
+export async function listDiaryEntriesInRange(from: string, to: string): Promise<DiaryEntryRow[]> {
+  const userId = await resolveAuthenticatedUserIdOrThrow();
+  const fromKey = validateCivilKeyOrThrow(from, "from");
+  const toKey = validateCivilKeyOrThrow(to, "to");
+  if (fromKey > toKey) {
+    throw new Error("from precisa ser anterior ou igual a to");
+  }
+  const { data, error } = await supabase
+    .from("diary_entries")
+    .select("*")
+    .eq("user_id", userId)
+    .gte("entry_date", fromKey)
+    .lte("entry_date", toKey)
+    .order("entry_date", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as DiaryEntryRow[];
+}
+
 export async function upsertDiaryEntry(
   date: string | Date,
   payload: DiaryEntryPayloadShape,
