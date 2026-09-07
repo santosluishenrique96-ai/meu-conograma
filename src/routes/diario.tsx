@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useMemo, useState } from "react";
+import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, BookOpenCheck, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -17,7 +17,39 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 const TAB_FORM = "form";
 const TAB_HISTORY = "history";
 
+const CIVIL_DATE_RE = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+function validateCivilDateString(raw: string): string | undefined {
+  const match = raw.match(CIVIL_DATE_RE);
+  if (!match) return undefined;
+  const [, yStr, mStr, dStr] = match;
+  const y = Number(yStr);
+  const m = Number(mStr);
+  const d = Number(dStr);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  if (d > daysInMonth) return undefined;
+  return `${yStr}-${mStr}-${dStr}`;
+}
+
+function localCivilDateKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function civilDateStringToLocalNoon(validatedCivil: string): Date {
+  const match = validatedCivil.match(CIVIL_DATE_RE)!;
+  const [, yStr, mStr, dStr] = match;
+  return new Date(Number(yStr), Number(mStr) - 1, Number(dStr), 12, 0, 0, 0);
+}
+
 export const Route = createFileRoute("/diario")({
+  validateSearch: (search: Record<string, unknown>) => {
+    const raw = typeof search.date === "string" ? search.date : undefined;
+    if (!raw) return { date: undefined };
+    return { date: validateCivilDateString(raw) };
+  },
   head: () => ({
     meta: [
       { title: "Diário Capilar — Meu Cronograma" },
@@ -71,23 +103,26 @@ function formatHeaderDate(date: Date, isToday: boolean) {
 
 function DiarioPage() {
   const { user, loading: authLoading } = useAuth();
+  const navigate = useNavigate();
+  const search = Route.useSearch();
   const today = useMemo(() => {
     const t = new Date();
     t.setHours(12, 0, 0, 0);
     return t;
   }, []);
 
-  const [selectedDate, setSelectedDate] = useState<Date>(today);
+  const [selectedDate, setSelectedDate] = useState<Date>(() => {
+    if (!search.date) return today;
+    const candidate = civilDateStringToLocalNoon(search.date);
+    if (isLocalDateInFuture(candidate, today)) return today;
+    return candidate;
+  });
+
   const [tab, setTab] = useState<string>(TAB_FORM);
   const [page, setPage] = useState(0);
 
   const enabledEntry = !authLoading && Boolean(user);
-  const selectedDateKey = useMemo(() => {
-    const y = selectedDate.getFullYear();
-    const m = String(selectedDate.getMonth() + 1).padStart(2, "0");
-    const d = String(selectedDate.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
-  }, [selectedDate]);
+  const selectedDateKey = useMemo(() => localCivilDateKey(selectedDate), [selectedDate]);
   const entryByDate = useDiaryEntryByDate(selectedDateKey, enabledEntry);
   const upsertMutation = useDiaryUpsertEntry();
 
@@ -98,35 +133,51 @@ function DiarioPage() {
   const isToday = isSameLocalDay(selectedDate, today);
   const isFuture = isLocalDateInFuture(selectedDate, today);
 
-  const setDate = useCallback(
-    (d: Date) => {
-      if (isLocalDateInFuture(d, today)) {
+  useEffect(() => {
+    const targetKey = search.date ? validateCivilDateString(search.date) : undefined;
+    const candidate: Date = targetKey ? civilDateStringToLocalNoon(targetKey) : today;
+    const isFutureCandidate = targetKey !== undefined && isLocalDateInFuture(candidate, today);
+    const finalDate = isFutureCandidate ? today : candidate;
+    const finalKey = localCivilDateKey(finalDate);
+    const currentKey = localCivilDateKey(selectedDate);
+    if (currentKey !== finalKey) {
+      setSelectedDate(finalDate);
+    }
+  }, [search.date, selectedDate, today]);
+
+  const changeSelectedDate = useCallback(
+    (next: Date) => {
+      if (isLocalDateInFuture(next, today)) {
         toast.message("Amanhã e datas futuras não podem ser registradas ainda.");
         return;
       }
-      const local = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0);
+      const local = new Date(next.getFullYear(), next.getMonth(), next.getDate(), 12, 0, 0, 0);
+      const key = localCivilDateKey(local);
       setSelectedDate(local);
+      navigate({ to: "/diario", search: (prev) => ({ ...prev, date: key }) });
     },
-    [today],
+    [today, navigate],
   );
 
-  const navYesterday = () => setDate(addDays(selectedDate, -1));
+  const setDate = useCallback((d: Date) => changeSelectedDate(d), [changeSelectedDate]);
+
+  const navYesterday = () => changeSelectedDate(addDays(selectedDate, -1));
   const navTomorrow = () => {
     const next = addDays(selectedDate, +1);
     if (isLocalDateInFuture(next, today)) {
       toast.message("Amanhã e datas futuras estão bloqueadas.");
       return;
     }
-    setDate(next);
+    changeSelectedDate(next);
   };
-  const backToday = () => setDate(today);
+  const backToday = () => changeSelectedDate(today);
 
   const onSelectFromHistory = useCallback(
     (d: Date) => {
-      setDate(d);
+      changeSelectedDate(d);
       setTab(TAB_FORM);
     },
-    [setDate],
+    [changeSelectedDate],
   );
 
   const onLoadMore = useCallback(async () => {
