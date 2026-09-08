@@ -1,3 +1,4 @@
+import { DEFAULT_SCHEDULE_PREFS } from "@/constants/schedule-defaults";
 import { supabase } from "@/integrations/supabase/client";
 import { DIARY_PERCEIVED_RESULTS, DIARY_PERCEPTION_METRICS, DIARY_TREATMENTS } from "@/types/diary";
 import type {
@@ -26,20 +27,6 @@ type ScheduleSnapshotSource = Pick<
   | "saturday"
   | "sunday"
 >;
-
-// Dívida técnica (Fase futura): deduplicar este fallback com os DEFAULT_PREFS de
-// src/routes/cronograma.tsx, mantendo uma única fonte de defaults canônicos.
-const DEFAULT_SCHEDULE_PREFS_FALLBACK: ScheduleSnapshotSource = {
-  hair_type: null,
-  goal: null,
-  monday: "Hidratação",
-  tuesday: "Descanso",
-  wednesday: "Nutrição",
-  thursday: "Descanso",
-  friday: "Hidratação",
-  saturday: "Reconstrução",
-  sunday: "Cuidado",
-};
 
 const ALLOWED_TREATMENTS = new Set<string>(DIARY_TREATMENTS);
 const ALLOWED_RESULTS = new Set<string>(DIARY_PERCEIVED_RESULTS);
@@ -159,7 +146,7 @@ export function buildScheduleFocusSnapshot(
   prefs: ScheduleSnapshotSource | null,
   date: Date,
 ): ScheduleFocusSnapshot | null {
-  const effective = prefs ?? DEFAULT_SCHEDULE_PREFS_FALLBACK;
+  const effective = prefs ?? DEFAULT_SCHEDULE_PREFS;
   const weekdayIndex = date.getDay();
   const weekdayKeys = [
     "sunday",
@@ -171,7 +158,7 @@ export function buildScheduleFocusSnapshot(
     "saturday",
   ] as const;
   const key = weekdayKeys[weekdayIndex];
-  const focus = ((effective as Record<string, unknown>)[key] as string | null | undefined) ?? null;
+  const focus = effective[key] ?? null;
   if (!focus || typeof focus !== "string") return null;
   const hairType = effective.hair_type ?? null;
   const goal = effective.goal ?? null;

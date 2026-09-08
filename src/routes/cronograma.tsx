@@ -19,6 +19,11 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import {
+  DEFAULT_SCHEDULE_PREFS,
+  ScheduleFocus,
+  SchedulePrefsShape,
+} from "@/constants/schedule-defaults";
 import { FeatureAccessGuard } from "@/components/feature-access-guard";
 import { SiteHeader } from "@/components/SiteHeader";
 import { useAuth } from "@/hooks/use-auth";
@@ -42,7 +47,7 @@ export const Route = createFileRoute("/cronograma")({
 });
 
 type Tab = "diario" | "semanal" | "mensal";
-type FocusType = "Hidratação" | "Nutrição" | "Reconstrução" | "Descanso" | "Cuidado";
+type FocusType = ScheduleFocus;
 
 const FOCUS_TYPES: Record<FocusType, { icon: LucideIcon; color: string; desc: string }> = {
   Hidratação: {
@@ -346,29 +351,9 @@ const PRODUCT_RECOMMENDATIONS: Record<CoreFocusType, ProductRecommendation> = {
   },
 };
 
-type Prefs = {
-  hair_type: string | null;
-  goal: string | null;
-  monday: FocusType;
-  tuesday: FocusType;
-  wednesday: FocusType;
-  thursday: FocusType;
-  friday: FocusType;
-  saturday: FocusType;
-  sunday: FocusType;
-};
+type Prefs = SchedulePrefsShape<string | null, ScheduleFocus>;
 
-const DEFAULT_PREFS: Prefs = {
-  hair_type: null,
-  goal: null,
-  monday: "Hidratação",
-  tuesday: "Descanso",
-  wednesday: "Nutrição",
-  thursday: "Descanso",
-  friday: "Hidratação",
-  saturday: "Reconstrução",
-  sunday: "Cuidado",
-};
+const DEFAULT_PREFS: Prefs = DEFAULT_SCHEDULE_PREFS;
 
 const focusOptions = Object.keys(FOCUS_TYPES) as FocusType[];
 
