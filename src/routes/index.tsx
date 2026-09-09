@@ -2,18 +2,31 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   Calendar,
   Droplet,
+  Leaf,
+  Wrench,
   Sparkles,
+  Check,
+  ArrowRight,
   TrendingUp,
+  BookOpenCheck,
   Bell,
   Trophy,
-  ArrowRight,
-  House,
-  UserRound,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import heroImg from "@/assets/hero-hair.jpg";
+import {
+  DEFAULT_SCHEDULE_PREFS,
+  ScheduleFocus,
+  SchedulePrefsShape,
+} from "@/constants/schedule-defaults";
 import { SubscriptionPlanShowcase } from "@/components/subscription-plan-showcase";
 import { SiteHeader } from "@/components/SiteHeader";
 import { useAuth } from "@/hooks/use-auth";
+import { useDiaryEntriesInRange } from "@/hooks/use-diary";
+import { useFeatureAccess } from "@/hooks/use-subscription-permissions";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -46,14 +59,14 @@ const features = [
     desc: "A tríade perfeita organizada para você nunca errar a ordem.",
   },
   {
+    icon: Sparkles,
+    title: "Dicas de Especialistas",
+    desc: "Conteúdo exclusivo para potencializar seus resultados.",
+  },
+  {
     icon: Bell,
     title: "Lembretes Personalizados",
     desc: "Notificações no momento certo de cada etapa do seu cuidado.",
-  },
-  {
-    icon: Trophy,
-    title: "Gamificação",
-    desc: "Ganhe conquistas e suba de nível mantendo sua rotina capilar.",
   },
   {
     icon: TrendingUp,
@@ -61,43 +74,140 @@ const features = [
     desc: "Acompanhe o progresso com fotos e métricas semana a semana.",
   },
   {
-    icon: Sparkles,
-    title: "Dicas de Especialistas",
-    desc: "Conteúdo exclusivo para potencializar seus resultados.",
+    icon: Trophy,
+    title: "Gamificação",
+    desc: "Ganhe conquistas e suba de nível mantendo sua rotina capilar.",
   },
 ];
 
-const quickLinks = [
-  {
-    to: "/",
-    title: "Início",
-    desc: "Volte para a visão geral e novidades do app.",
-    icon: House,
+const FOCUS_TYPES: Record<ScheduleFocus, { icon: LucideIcon; color: string; desc: string }> = {
+  Hidratação: {
+    icon: Droplet,
+    color: "from-sky-400/90 to-cyan-500/90",
+    desc: "Devolve água e maciez aos fios. Use cremes hidratantes, tônicos e finalizadores leves.",
   },
-  {
-    to: "/cronograma",
-    title: "Cronograma",
-    desc: "Acompanhe sua rotina diária, semanal e mensal.",
-    icon: Calendar,
+  Nutrição: {
+    icon: Leaf,
+    color: "from-emerald-400/90 to-teal-500/90",
+    desc: "Repõe lipídios e brilho. Óleos vegetais, manteigas e cremes nutritivos são seus aliados.",
   },
-  {
-    to: "/evolucao",
-    title: "Evolução",
-    desc: "Salve fotos e acompanhe seus resultados.",
-    icon: TrendingUp,
+  Reconstrução: {
+    icon: Wrench,
+    color: "from-amber-400/90 to-orange-500/90",
+    desc: "Fortalece a fibra capilar. Queratinas, aminoácidos e proteínas restauram força e resistência.",
   },
-];
+  Descanso: {
+    icon: Sparkles,
+    color: "from-violet-400/90 to-purple-500/90",
+    desc: "Deixe os fios respirarem. Use apenas finalização leve, co-wash ou proteção térmica.",
+  },
+  Cuidado: {
+    icon: Sparkles,
+    color: "from-fuchsia-400/90 to-pink-500/90",
+    desc: "Dia versátil. Cuide com carinho: finalização, proteção UV e penteado sem calor.",
+  },
+};
+
+function parseFocusType(value: string | null | undefined): ScheduleFocus {
+  if (!value) return "Cuidado";
+  return value in FOCUS_TYPES ? (value as ScheduleFocus) : "Cuidado";
+}
+
+const CIVIL_DATE_RE = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+function isCivilKey(raw: unknown): raw is string {
+  return typeof raw === "string" && CIVIL_DATE_RE.test(raw);
+}
+
+function toCivilKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function addDaysLocal(date: Date, days: number): Date {
+  const t = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0, 0);
+  t.setDate(t.getDate() + days);
+  return t;
+}
+
+function startOfWeekMonday(date: Date): Date {
+  const weekday = date.getDay();
+  const delta = weekday === 0 ? -6 : 1 - weekday;
+  return addDaysLocal(date, delta);
+}
+
+const WEEKDAY_LABELS = [
+  "Domingo",
+  "Segunda-feira",
+  "Terça-feira",
+  "Quarta-feira",
+  "Quinta-feira",
+  "Sexta-feira",
+  "Sábado",
+] as const;
+
+const MONTH_LABELS = [
+  "janeiro",
+  "fevereiro",
+  "março",
+  "abril",
+  "maio",
+  "junho",
+  "julho",
+  "agosto",
+  "setembro",
+  "outubro",
+  "novembro",
+  "dezembro",
+] as const;
+
+type Prefs = SchedulePrefsShape<string | null, ScheduleFocus>;
+
+const WEEKDAY_KEYS = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+] as const;
 
 function Landing() {
-  const { user } = useAuth();
-  const primaryCta = user ? "/cronograma" : "/auth";
-  const userName = user?.user_metadata?.display_name || user?.email?.split("@")[0];
+  const { user, loading } = useAuth();
 
+  if (loading) {
+    return (
+      <div className="min-h-screen">
+        <SiteHeader />
+        <div className="container mx-auto flex min-h-[calc(100vh-4rem)] items-center justify-center px-4 py-12">
+          <div className="w-full max-w-md rounded-3xl border border-border bg-gradient-card p-8 text-center shadow-elegant">
+            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <h1 className="mt-4 text-2xl font-black">Preparando sua experiência</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Estamos verificando sua sessão para carregar a página inicial.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LandingPublic />;
+  }
+
+  return <HojeExperience />;
+}
+
+function LandingPublic() {
+  const primaryCta = "/auth";
   return (
     <div className="min-h-screen">
       <SiteHeader />
 
-      {/* HERO */}
       <section className="relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-hero" />
         <div className="container relative mx-auto grid items-center gap-12 px-4 py-20 md:grid-cols-2 md:py-32">
@@ -117,7 +227,7 @@ function Landing() {
                 to={primaryCta}
                 className="group inline-flex items-center gap-2 rounded-full bg-gradient-primary px-7 py-3.5 font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105"
               >
-                {user ? "Ver meu cronograma" : "Começar grátis"}{" "}
+                Começar grátis{" "}
                 <ArrowRight className="h-4 w-4 transition-smooth group-hover:translate-x-1" />
               </Link>
               <Link
@@ -155,48 +265,6 @@ function Landing() {
         </div>
       </section>
 
-      {user && (
-        <section className="container mx-auto px-4 pt-4 pb-8 md:pb-12">
-          <div className="rounded-3xl border border-primary/20 bg-gradient-card p-6 md:p-8">
-            <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-              <div className="max-w-2xl">
-                <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
-                  <UserRound className="h-3.5 w-3.5" /> Menu da usuária
-                </span>
-                <h2 className="mt-4 text-3xl font-black md:text-4xl">
-                  Olá, <span className="text-gradient">{userName}</span>
-                </h2>
-                <p className="mt-3 text-muted-foreground">
-                  Aqui estão todas as páginas principais para você navegar com rapidez pelo seu
-                  espaço.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {quickLinks.map((item) => (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  className="group rounded-3xl border border-border bg-background/60 p-5 transition-smooth hover:-translate-y-1 hover:border-primary/50 hover:shadow-glow"
-                >
-                  <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-primary shadow-glow">
-                    <item.icon className="h-5 w-5 text-primary-foreground" />
-                  </div>
-                  <h3 className="mt-4 text-lg font-bold">{item.title}</h3>
-                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{item.desc}</p>
-                  <span className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-primary">
-                    Abrir página{" "}
-                    <ArrowRight className="h-4 w-4 transition-smooth group-hover:translate-x-1" />
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* FEATURES */}
       <section id="recursos" className="section-anchor container mx-auto px-4 py-24">
         <div className="text-center max-w-2xl mx-auto mb-16">
           <h2 className="text-4xl md:text-5xl font-black">
@@ -226,7 +294,6 @@ function Landing() {
         <SubscriptionPlanShowcase mode="preview" />
       </section>
 
-      {/* CTA */}
       <section className="container mx-auto px-4 py-24">
         <div className="relative overflow-hidden rounded-3xl bg-gradient-card border border-primary/30 p-12 md:p-16 text-center">
           <div className="absolute inset-0 bg-gradient-hero opacity-60" />
@@ -241,12 +308,236 @@ function Landing() {
               to={primaryCta}
               className="mt-8 inline-flex items-center gap-2 rounded-full bg-gradient-primary px-8 py-4 font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105"
             >
-              {user ? "Ir para meu cronograma" : "Criar minha conta grátis"}{" "}
-              <ArrowRight className="h-4 w-4" />
+              Criar minha conta grátis <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
         </div>
       </section>
+
+      <footer className="border-t border-border/40 py-8 text-center text-sm text-muted-foreground">
+        © {new Date().getFullYear()} Meu Cronograma · Feito com amor para cabelos lindos.
+      </footer>
+    </div>
+  );
+}
+
+function HojeExperience() {
+  const { user } = useAuth();
+  const customScheduleAccess = useFeatureAccess("cronograma-personalizado", Boolean(user));
+  const canUseCustomSchedule = customScheduleAccess.data?.hasAccess ?? false;
+  const [prefs, setPrefs] = useState<Prefs>(DEFAULT_SCHEDULE_PREFS);
+
+  const todayLocal = useMemo(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0);
+  }, []);
+  const todayKey = toCivilKey(todayLocal);
+
+  const weekdayIndex = todayLocal.getDay();
+  const todayWeekdayKey = WEEKDAY_KEYS[weekdayIndex];
+  const todayWeekdayLabel = WEEKDAY_LABELS[weekdayIndex];
+  const todayMonthLabel = MONTH_LABELS[todayLocal.getMonth()];
+  const todayDayLabel = `${todayWeekdayLabel}, ${todayLocal.getDate()} de ${todayMonthLabel}`;
+
+  useEffect(() => {
+    if (!user || !canUseCustomSchedule) return;
+    let cancelled = false;
+    supabase
+      .from("schedule_preferences")
+      .select("*")
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          toast.error("Erro ao carregar seu cronograma personalizado");
+          return;
+        }
+        if (!data) return;
+        setPrefs({
+          hair_type: data.hair_type ?? null,
+          goal: data.goal ?? null,
+          monday: parseFocusType(data.monday),
+          tuesday: parseFocusType(data.tuesday),
+          wednesday: parseFocusType(data.wednesday),
+          thursday: parseFocusType(data.thursday),
+          friday: parseFocusType(data.friday),
+          saturday: parseFocusType(data.saturday),
+          sunday: parseFocusType(data.sunday),
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canUseCustomSchedule, user]);
+
+  const mondayDate = startOfWeekMonday(todayLocal);
+  const mondayKey = toCivilKey(mondayDate);
+
+  const { data: weekRows, status: weekStatus } = useDiaryEntriesInRange(
+    { from: mondayKey, to: todayKey },
+    Boolean(user),
+  );
+
+  const entriesByDate = useMemo(() => {
+    const set = new Set<string>();
+    if (Array.isArray(weekRows)) {
+      for (const row of weekRows) {
+        const r = row as { entry_date?: unknown };
+        if (isCivilKey(r.entry_date)) {
+          set.add(r.entry_date);
+        }
+      }
+    }
+    return set;
+  }, [weekRows]);
+
+  const todayFocus = prefs[todayWeekdayKey] || "Cuidado";
+  const focusMeta = FOCUS_TYPES[todayFocus] || FOCUS_TYPES.Cuidado;
+  const FocusIcon = focusMeta.icon;
+
+  const todayHasEntry = entriesByDate.has(todayKey);
+  const registrationsCount = entriesByDate.size;
+  const totalWeekDays = weekdayIndex === 0 ? 7 : weekdayIndex; // segunda=1 idx → 1 dia; domingo=0 idx → 7 dias
+  const userName = user?.user_metadata?.display_name || user?.email?.split("@")[0] || "linda";
+  const loadingWeek = weekStatus === "pending";
+
+  return (
+    <div className="min-h-screen">
+      <SiteHeader />
+
+      <main className="container mx-auto px-4 py-12 md:py-16">
+        <section className="mb-10">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div className="max-w-3xl">
+              <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+                <Calendar className="h-3.5 w-3.5" /> Hoje no cronograma
+              </span>
+              <h1 className="mt-4 text-3xl font-black leading-tight md:text-5xl">
+                Olá, <span className="text-gradient">{userName}</span>. Vamos cuidar dos seus fios?
+              </h1>
+              <p className="mt-3 text-base text-muted-foreground md:text-lg">{todayDayLabel}</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-[1.4fr_0.8fr]">
+          <article className="overflow-hidden rounded-3xl border border-primary/20 bg-gradient-card shadow-elegant">
+            <div className="p-6 md:p-8">
+              <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+                <div className="max-w-2xl">
+                  <div
+                    className={`inline-flex items-center gap-2 rounded-full bg-gradient-to-r ${focusMeta.color} px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-background shadow-md`}
+                  >
+                    <FocusIcon className="h-4 w-4" /> {todayFocus}
+                  </div>
+                  <h2 className="mt-5 text-2xl font-black md:text-4xl">
+                    Hoje é dia de <span className="text-gradient">{todayFocus}</span>
+                  </h2>
+                  <p className="mt-4 text-sm leading-relaxed text-foreground/90 md:text-base">
+                    {focusMeta.desc}
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-3 md:items-end">
+                  {todayHasEntry ? (
+                    <span className="inline-flex w-max items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-600">
+                      <Check className="h-4 w-4" /> Registrado hoje
+                    </span>
+                  ) : (
+                    <span className="inline-flex w-max items-center gap-1.5 rounded-full border border-border bg-card/60 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      <BookOpenCheck className="h-3.5 w-3.5" /> Aguardando seu registro
+                    </span>
+                  )}
+
+                  <Link
+                    to="/diario"
+                    search={{ date: todayKey }}
+                    className="group inline-flex items-center justify-center gap-2 rounded-full bg-gradient-primary px-7 py-3 font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105"
+                  >
+                    {todayHasEntry ? "Ver registro de hoje" : "Registrar no Diário"}
+                    <ArrowRight className="h-4 w-4 transition-smooth group-hover:translate-x-1" />
+                  </Link>
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t border-border/40 bg-background/40 p-6 md:p-8">
+              <div className="flex flex-col items-start gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    Sua semana
+                  </div>
+                  <p className="mt-1 text-base font-semibold text-foreground md:text-lg">
+                    {loadingWeek ? (
+                      <span className="inline-flex items-center gap-2">
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />{" "}
+                        Carregando semana…
+                      </span>
+                    ) : (
+                      <>
+                        Você registrou <span className="text-gradient">{registrationsCount}</span>{" "}
+                        de <span className="font-bold">{totalWeekDays}</span> dias desta semana.
+                      </>
+                    )}
+                  </p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Registre cada dia para acompanhar sua consistência e manter seu cabelo saudável.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <Link
+                    to="/cronograma"
+                    className="inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-5 py-2.5 text-sm font-bold transition-smooth hover:border-primary hover:text-primary"
+                  >
+                    Cronograma completo <ArrowRight className="h-4 w-4" />
+                  </Link>
+                  <Link
+                    to="/evolucao"
+                    className="inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-5 py-2.5 text-sm font-bold transition-smooth hover:border-primary hover:text-primary"
+                  >
+                    Evolução <TrendingUp className="h-4 w-4" />
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <aside className="space-y-6">
+            <div className="rounded-3xl border border-border bg-gradient-card p-6">
+              <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Sobre sua rotina
+              </div>
+              <h3 className="mt-2 text-xl font-black">Foco do dia em 3 passos</h3>
+              <ol className="mt-4 space-y-3 text-sm leading-relaxed text-foreground/90">
+                <li>
+                  <strong className="text-foreground">1. Preparo:</strong> comece lavando com
+                  shampoo adequado para seu tipo de cabelo.
+                </li>
+                <li>
+                  <strong className="text-foreground">2. Tratamento:</strong> aplique o produto do
+                  foco de hoje e deixe aguardar o tempo recomendado.
+                </li>
+                <li>
+                  <strong className="text-foreground">3. Registro:</strong> finalize o cuidado e
+                  registre sua percepção no Diário.
+                </li>
+              </ol>
+            </div>
+
+            <div className="rounded-3xl border border-primary/30 bg-primary/5 p-6">
+              <div className="text-xs font-bold uppercase tracking-wider text-primary">
+                Dica rápida
+              </div>
+              <p className="mt-2 text-sm leading-relaxed text-foreground/90">
+                Registre mesmo nos dias de {`"Descanso"`}: consistência no cuidado ajuda você a
+                entender o que melhor funciona para os seus fios.
+              </p>
+            </div>
+          </aside>
+        </section>
+      </main>
 
       <footer className="border-t border-border/40 py-8 text-center text-sm text-muted-foreground">
         © {new Date().getFullYear()} Meu Cronograma · Feito com amor para cabelos lindos.
