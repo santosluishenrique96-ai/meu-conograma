@@ -11,6 +11,8 @@ import {
   BookOpenCheck,
   Bell,
   Trophy,
+  AlertCircle,
+  BarChart3,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -20,12 +22,27 @@ import {
   ScheduleFocus,
   SchedulePrefsShape,
 } from "@/constants/schedule-defaults";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { SubscriptionPlanShowcase } from "@/components/subscription-plan-showcase";
 import { SiteHeader } from "@/components/SiteHeader";
 import { useAuth } from "@/hooks/use-auth";
 import { useDiaryEntriesInRange } from "@/hooks/use-diary";
 import { useFeatureAccess } from "@/hooks/use-subscription-permissions";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  computeTreatmentPatterns,
+  computeWeeklySummary,
+} from "@/lib/diary-analysis";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/")({
@@ -374,10 +391,11 @@ function HojeExperience() {
   const mondayDate = startOfWeekMonday(todayLocal);
   const mondayKey = toCivilKey(mondayDate);
 
-  const { data: weekRows, status: weekStatus } = useDiaryEntriesInRange(
+  const weekRange = useDiaryEntriesInRange(
     { from: mondayKey, to: todayKey },
     Boolean(user),
   );
+  const { data: weekRows, status: weekStatus, refetch: refetchWeekRange, error: weekErrorRaw } = weekRange;
 
   const entriesByDate = useMemo(() => {
     const set = new Set<string>();
@@ -401,6 +419,26 @@ function HojeExperience() {
   const totalWeekDays = weekdayIndex === 0 ? 7 : weekdayIndex; // segunda=1 idx → 1 dia; domingo=0 idx → 7 dias
   const userName = user?.user_metadata?.display_name || user?.email?.split("@")[0] || "linda";
   const loadingWeek = weekStatus === "pending";
+  const errorWeek = weekStatus === "error";
+
+  const weekRowsSafe = Array.isArray(weekRows) ? weekRows : [];
+
+  const weeklySummary = useMemo(
+    () => computeWeeklySummary(weekRowsSafe, todayLocal),
+    [weekRowsSafe, todayLocal],
+  );
+  const treatmentPatterns = useMemo(
+    () => computeTreatmentPatterns(weekRowsSafe),
+    [weekRowsSafe],
+  );
+
+  const firstEnoughPattern = treatmentPatterns.patterns.find((p) => p.hasEnoughData);
+
+  const hasAnyEntry = weeklySummary.registeredDays > 0;
+  const evaluatedCount = weeklySummary.perceived.evaluatedCount;
+  const perceivedPositiveCount = weeklySummary.perceived.positive;
+
+  const weekShortEmpty = !hasAnyEntry && !errorWeek && !loadingWeek;
 
   return (
     <div className="min-h-screen">
@@ -536,6 +574,123 @@ function HojeExperience() {
               </p>
             </div>
           </aside>
+        </section>
+
+        <section className="mt-10">
+          {errorWeek ? (
+            <Alert variant="destructive" className="border-destructive/40 bg-destructive/5">
+              <AlertCircle className="h-4 w-4 text-destructive" />
+              <AlertTitle>Não foi possível carregar seu resumo agora.</AlertTitle>
+              <AlertDescription className="mt-1.5 flex flex-wrap items-center gap-2">
+                <span className="text-sm">A experiência principal de hoje continua disponível.</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="rounded-full"
+                  onClick={() => refetchWeekRange()}
+                >
+                  Tentar novamente
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          {loadingWeek ? (
+            <Card className="border-border bg-gradient-card">
+              <CardContent className="p-6">
+                <div className="space-y-3">
+                  <Skeleton className="h-4 w-56" />
+                  <Skeleton className="h-8 w-72" />
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <Skeleton className="h-9 w-44 rounded-full" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {!loadingWeek && !errorWeek ? (
+            <Card className="border-border bg-gradient-card shadow-elegant">
+              <CardHeader className="pb-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge
+                    variant="outline"
+                    className="rounded-full border-primary/30 bg-primary/5 text-foreground"
+                  >
+                    <BarChart3 className="mr-1.5 h-3 w-3 text-primary" />
+                    Seu progresso nesta semana
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-0">
+                {weekShortEmpty ? (
+                  <div className="space-y-4">
+                    <CardTitle className="text-xl font-black leading-tight">
+                      Comece a acompanhar sua semana
+                    </CardTitle>
+                    <CardDescription className="text-sm">
+                      Registre seus cuidados no Diário para acompanhar seus padrões ao longo do
+                      tempo.
+                    </CardDescription>
+                    <div className="pt-2">
+                      <Link
+                        to="/diario"
+                        search={{ date: todayKey }}
+                        className="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-primary px-6 py-2.5 text-sm font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105"
+                      >
+                        <Sparkles className="h-4 w-4" /> Registrar hoje
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <CardTitle className="text-xl font-black leading-tight">
+                      Você registrou{" "}
+                      <span className="text-gradient">{weeklySummary.registeredDays}</span> de{" "}
+                      <span className="font-bold">{weeklySummary.elapsedDays}</span> dias desta
+                      semana.
+                    </CardTitle>
+
+                    {evaluatedCount > 0 ? (
+                      <p className="text-sm text-foreground/90 leading-relaxed">
+                        Em <span className="font-bold">{perceivedPositiveCount}</span> de{" "}
+                        <span className="font-bold">{evaluatedCount}</span> registros avaliados,
+                        a resposta foi Bom ou Muito bom.
+                      </p>
+                    ) : null}
+
+                    {firstEnoughPattern ? (
+                      <div className="rounded-2xl border border-border bg-card/70 p-4">
+                        <p className="text-sm text-foreground/90 leading-relaxed">
+                          Em registros com{" "}
+                          <span className="font-black">{firstEnoughPattern.treatment}</span>,{" "}
+                          <span className="font-bold">
+                            {firstEnoughPattern.positiveCount}
+                          </span>{" "}
+                          de{" "}
+                          <span className="font-bold">
+                            {firstEnoughPattern.evaluatedPerceivedCount}
+                          </span>{" "}
+                          avaliações foram Bom ou Muito bom.
+                        </p>
+                      </div>
+                    ) : null}
+
+                    <div className="pt-2">
+                      <Link
+                        to="/diario"
+                        search={{ date: todayKey }}
+                        className="inline-flex items-center justify-center gap-2 rounded-full border border-border bg-card/70 px-5 py-2 text-sm font-bold transition-smooth hover:border-primary hover:text-primary"
+                      >
+                        Ver resumo completo <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ) : null}
         </section>
       </main>
 
