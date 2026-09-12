@@ -25,7 +25,14 @@ import {
   validatePayloadShape,
   validateTreatments,
 } from "../src/services/diary";
-import type { DiaryTreatment } from "../src/types/diary";
+import {
+  computePerceivedComparison,
+  computeTreatmentPatterns,
+  computeWeeklySummary,
+  type TreatmentPatternsResult,
+  type WeeklySummary,
+} from "../src/lib/diary-analysis";
+import type { DiaryEntryRow, DiaryTreatment } from "../src/types/diary";
 import type { SchedulePrefsWithSource } from "../src/constants/schedule-defaults";
 
 let supabase: SupabaseClient<Database> | undefined;
@@ -115,6 +122,501 @@ async function cleanup(svc: SupabaseClient<Database>, userId: string) {
     await supabase.auth.signOut();
   } catch {
     /* ignore */
+  }
+}
+
+function makeMinimalRow(opts: {
+  entry_date: string;
+  treatments?: DiaryTreatment[];
+  perceived_result?: DiaryEntryRow["perceived_result"] | null;
+  frizz?: number | null;
+  dryness?: number | null;
+  oiliness?: number | null;
+  definition?: number | null;
+  shine?: number | null;
+  breakage?: number | null;
+}): DiaryEntryRow {
+  return {
+    id: `id-${Math.random().toString(36).slice(2, 12)}`,
+    user_id: "test-user-static-analysis",
+    entry_date: opts.entry_date,
+    treatments: opts.treatments ?? [],
+    perceived_result: opts.perceived_result ?? null,
+    frizz: opts.frizz ?? null,
+    dryness: opts.dryness ?? null,
+    oiliness: opts.oiliness ?? null,
+    definition: opts.definition ?? null,
+    shine: opts.shine ?? null,
+    breakage: opts.breakage ?? null,
+    note: null,
+    evolution_photo_id: null,
+    scheduled_focus_snapshot: null,
+    created_at: new Date(2026, 0, 1, 12).toISOString(),
+    updated_at: new Date(2026, 0, 1, 12).toISOString(),
+  } as DiaryEntryRow;
+}
+
+function assertFiniteNumber(label: string, value: number | null | undefined, expected: number | null) {
+  if (expected === null) {
+    if (value !== null) throw new Error(`${label} expected null got ${String(value)}`);
+    return;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${label} expected finite number got ${String(value)}`);
+  }
+  if (Math.abs(value - expected) > 1e-9) {
+    throw new Error(`${label} expected ${expected} got ${value}`);
+  }
+}
+
+function runAnalysisStaticTests() {
+  console.log("ANA-A computeWeeklySummary zero rows → zeros/empty states, sem NaN");
+  {
+    const monday = new Date(2026, 8, 14, 12, 0, 0, 0);
+    const s = computeWeeklySummary([], monday);
+    if (s.registeredDays !== 0) throw new Error(`zero rows registeredDays: ${s.registeredDays}`);
+    if (s.elapsedDays !== 1) throw new Error(`segunda-feira elapsedDays: ${s.elapsedDays}`);
+    if (s.perceived.evaluatedCount !== 0) throw new Error(`evaluatedCount zero: ${s.perceived.evaluatedCount}`);
+    if (s.perceived.positive + s.perceived.neutral + s.perceived.negative !== 0) {
+      throw new Error(`pnz sum: ${s.perceived.positive + s.perceived.neutral + s.perceived.negative}`);
+    }
+    for (const m of ["frizz", "dryness", "oiliness", "definition", "shine", "breakage"] as const) {
+      if (s.metrics[m].average !== null) {
+        throw new Error(`${m} average não null: ${String(s.metrics[m].average)}`);
+      }
+      if (s.metrics[m].sampleCount !== 0) {
+        throw new Error(`${m} sampleCount não 0: ${s.metrics[m].sampleCount}`);
+      }
+    }
+    const anyNaN =
+      Number.isNaN(s.registeredDays) ||
+      Number.isNaN(s.elapsedDays) ||
+      Number.isNaN(s.perceived.evaluatedCount);
+    if (anyNaN) throw new Error("NaN em zero rows");
+  }
+
+  console.log("ANA-B segunda-feira como today → elapsedDays=1");
+  {
+    const segunda = new Date(2026, 8, 14, 12, 0, 0, 0);
+    const rows = [
+      makeMinimalRow({ entry_date: "2026-09-14", treatments: ["Lavagem"] }),
+    ];
+    const s = computeWeeklySummary(rows, segunda);
+    if (s.elapsedDays !== 1) throw new Error(`seg elapsed: ${s.elapsedDays}`);
+    if (s.registeredDays !== 1) throw new Error(`seg registeredDays: ${s.registeredDays}`);
+    if (s.weekStartCivilKey !== "2026-09-14") {
+      throw new Error(`weekStart: ${s.weekStartCivilKey}`);
+    }
+    if (s.weekEndCivilKey !== "2026-09-20") {
+      throw new Error(`weekEnd: ${s.weekEndCivilKey}`);
+    }
+  }
+
+  console.log("ANA-C domingo = 7 dias transcorridos");
+  {
+    const domingo = new Date(2026, 8, 20, 12, 0, 0, 0);
+    const rows: DiaryEntryRow[] = [];
+    const s = computeWeeklySummary(rows, domingo);
+    if (s.elapsedDays !== 7) throw new Error(`domingo elapsed: ${s.elapsedDays}`);
+    if (s.weekStartCivilKey !== "2026-09-14") {
+      throw new Error(`domingo weekStart: ${s.weekStartCivilKey}`);
+    }
+  }
+
+  console.log("ANA-D perceived_result null excluído do denominador");
+  {
+    const quarta = new Date(2026, 8, 16, 12, 0, 0, 0);
+    const rows = [
+      makeMinimalRow({ entry_date: "2026-09-14", perceived_result: null, treatments: ["Lavagem"] }),
+      makeMinimalRow({ entry_date: "2026-09-15", perceived_result: "Bom" }),
+      makeMinimalRow({ entry_date: "2026-09-16", perceived_result: null }),
+    ];
+    const s = computeWeeklySummary(rows, quarta);
+    if (s.perceived.evaluatedCount !== 1) {
+      throw new Error(`evaluatedCount deveria ser 1: ${s.perceived.evaluatedCount}`);
+    }
+    if (s.perceived.positive !== 1 || s.perceived.neutral !== 0 || s.perceived.negative !== 0) {
+      throw new Error(
+        `pnz: pos=${s.perceived.positive} neu=${s.perceived.neutral} neg=${s.perceived.negative}`,
+      );
+    }
+  }
+
+  console.log("ANA-E métrica null excluída da média, não vira zero");
+  {
+    const hoje = new Date(2026, 8, 16, 12, 0, 0, 0);
+    const rows = [
+      makeMinimalRow({ entry_date: "2026-09-14", frizz: 3, dryness: null }),
+      makeMinimalRow({ entry_date: "2026-09-15", frizz: null, dryness: 5 }),
+      makeMinimalRow({ entry_date: "2026-09-16", frizz: null, dryness: null }),
+    ];
+    const s = computeWeeklySummary(rows, hoje);
+    assertFiniteNumber("frizz avg", s.metrics.frizz.average, 3);
+    if (s.metrics.frizz.sampleCount !== 1) throw new Error(`frizz sample: ${s.metrics.frizz.sampleCount}`);
+    assertFiniteNumber("dryness avg", s.metrics.dryness.average, 5);
+    if (s.metrics.dryness.sampleCount !== 1) {
+      throw new Error(`dryness sample: ${s.metrics.dryness.sampleCount}`);
+    }
+  }
+
+  console.log("ANA-F média correta de valores 1-5 (múltiplas amostras)");
+  {
+    const hoje = new Date(2026, 8, 18, 12, 0, 0, 0);
+    const rows = [
+      makeMinimalRow({ entry_date: "2026-09-14", shine: 4 }),
+      makeMinimalRow({ entry_date: "2026-09-15", shine: 2 }),
+      makeMinimalRow({ entry_date: "2026-09-16", shine: 5 }),
+      makeMinimalRow({ entry_date: "2026-09-17", shine: null }),
+    ];
+    const s = computeWeeklySummary(rows, hoje);
+    assertFiniteNumber("shine avg", s.metrics.shine.average, (4 + 2 + 5) / 3);
+    if (s.metrics.shine.sampleCount !== 3) {
+      throw new Error(`shine sample: ${s.metrics.shine.sampleCount}`);
+    }
+  }
+
+  console.log("ANA-G positive Bom/Muito bom");
+  {
+    const hoje = new Date(2026, 8, 18, 12);
+    const rows = [
+      makeMinimalRow({ entry_date: "2026-09-14", perceived_result: "Bom" }),
+      makeMinimalRow({ entry_date: "2026-09-15", perceived_result: "Muito bom" }),
+      makeMinimalRow({ entry_date: "2026-09-16", perceived_result: "Neutro" }),
+      makeMinimalRow({ entry_date: "2026-09-17", perceived_result: "Ruim" }),
+      makeMinimalRow({ entry_date: "2026-09-18", perceived_result: "Muito ruim" }),
+    ];
+    const s = computeWeeklySummary(rows, hoje);
+    if (s.perceived.positive !== 2) throw new Error(`pos: ${s.perceived.positive}`);
+    if (s.perceived.neutral !== 1) throw new Error(`neu: ${s.perceived.neutral}`);
+    if (s.perceived.negative !== 2) throw new Error(`neg: ${s.perceived.negative}`);
+    if (s.perceived.evaluatedCount !== 5) {
+      throw new Error(`evaluatedCount: ${s.perceived.evaluatedCount}`);
+    }
+  }
+
+  console.log("ANA-H neutral Neutro");
+  {
+    const hoje = new Date(2026, 8, 15, 12);
+    const rows = [
+      makeMinimalRow({ entry_date: "2026-09-14", perceived_result: "Neutro" }),
+      makeMinimalRow({ entry_date: "2026-09-15", perceived_result: "Neutro" }),
+    ];
+    const s = computeWeeklySummary(rows, hoje);
+    if (s.perceived.neutral !== 2 || s.perceived.positive !== 0 || s.perceived.negative !== 0) {
+      throw new Error(
+        `neutral pure: neu=${s.perceived.neutral} pos=${s.perceived.positive} neg=${s.perceived.negative}`,
+      );
+    }
+  }
+
+  console.log("ANA-I negative Ruim/Muito ruim");
+  {
+    const hoje = new Date(2026, 8, 16, 12);
+    const rows = [
+      makeMinimalRow({ entry_date: "2026-09-14", perceived_result: "Ruim" }),
+      makeMinimalRow({ entry_date: "2026-09-15", perceived_result: "Muito ruim" }),
+      makeMinimalRow({ entry_date: "2026-09-16", perceived_result: "Bom" }),
+    ];
+    const s = computeWeeklySummary(rows, hoje);
+    if (s.perceived.negative !== 2) throw new Error(`neg: ${s.perceived.negative}`);
+    if (s.perceived.positive !== 1) throw new Error(`pos: ${s.perceived.positive}`);
+  }
+
+  console.log("ANA-J múltiplos treatments no mesmo dia → todos contam (co-ocorrência factual)");
+  {
+    const hoje = new Date(2026, 8, 16, 12);
+    const rows = [
+      makeMinimalRow({
+        entry_date: "2026-09-14",
+        treatments: ["Lavagem", "Hidratação", "Finalização"],
+      }),
+      makeMinimalRow({
+        entry_date: "2026-09-15",
+        treatments: ["Lavagem", "Nutrição", "Finalização"],
+      }),
+      makeMinimalRow({ entry_date: "2026-09-16", treatments: ["Umectação"] }),
+    ];
+    const s = computeWeeklySummary(rows, hoje);
+    if (s.treatmentCounts["Lavagem"] !== 2) {
+      throw new Error(`Lavagem count: ${s.treatmentCounts["Lavagem"]}`);
+    }
+    if (s.treatmentCounts["Finalização"] !== 2) {
+      throw new Error(`Finalização count: ${s.treatmentCounts["Finalização"]}`);
+    }
+    if (s.treatmentCounts["Umectação"] !== 1) {
+      throw new Error(`Umectação count: ${s.treatmentCounts["Umectação"]}`);
+    }
+    if (s.treatmentCounts["Reconstrução"] !== 0) {
+      throw new Error(`Reconstrução indevido: ${s.treatmentCounts["Reconstrução"]}`);
+    }
+  }
+
+  console.log("ANA-K treatment com 1 registro = insuficiente hasEnoughData=false");
+  {
+    const rows = [
+      makeMinimalRow({
+        entry_date: "2026-09-14",
+        treatments: ["Hidratação"],
+        perceived_result: "Bom",
+      }),
+    ];
+    const r = computeTreatmentPatterns(rows);
+    const hid = r.patterns.find((p) => p.treatment === "Hidratação");
+    if (!hid) throw new Error("Hidratação não encontrado");
+    if (hid.occurrences !== 1) throw new Error(`occ: ${hid.occurrences}`);
+    if (hid.evaluatedPerceivedCount !== 1) {
+      throw new Error(`eval: ${hid.evaluatedPerceivedCount}`);
+    }
+    if (hid.hasEnoughData !== false) throw new Error(`hasEnoughData não false: ${hid.hasEnoughData}`);
+    if (hid.perceivedSufficiency !== false) {
+      throw new Error(`perceivedSufficiency não false: ${hid.perceivedSufficiency}`);
+    }
+  }
+
+  console.log("ANA-L treatment com 2 registros = insuficiente");
+  {
+    const rows = [
+      makeMinimalRow({ entry_date: "2026-09-14", treatments: ["Nutrição"], perceived_result: "Bom" }),
+      makeMinimalRow({ entry_date: "2026-09-15", treatments: ["Nutrição"], perceived_result: "Neutro" }),
+    ];
+    const r = computeTreatmentPatterns(rows);
+    const n = r.patterns.find((p) => p.treatment === "Nutrição")!;
+    if (n.evaluatedPerceivedCount !== 2) {
+      throw new Error(`perceived eval 2: ${n.evaluatedPerceivedCount}`);
+    }
+    if (n.hasEnoughData !== false) throw new Error(`hasEnoughData não false: ${n.hasEnoughData}`);
+  }
+
+  console.log("ANA-M treatment com 3 registros avaliados = suficiente");
+  {
+    const rows = [
+      makeMinimalRow({ entry_date: "2026-09-14", treatments: ["Reconstrução"], perceived_result: "Muito bom" }),
+      makeMinimalRow({ entry_date: "2026-09-15", treatments: ["Reconstrução"], perceived_result: "Neutro" }),
+      makeMinimalRow({ entry_date: "2026-09-16", treatments: ["Reconstrução"], perceived_result: "Ruim" }),
+    ];
+    const r = computeTreatmentPatterns(rows);
+    const rec = r.patterns.find((p) => p.treatment === "Reconstrução")!;
+    if (rec.evaluatedPerceivedCount !== 3) throw new Error(`eval: ${rec.evaluatedPerceivedCount}`);
+    if (rec.perceivedSufficiency !== true) throw new Error(`perceivedSufficiency não true`);
+    if (rec.hasEnoughData !== true) throw new Error(`hasEnoughData não true: ${rec.hasEnoughData}`);
+    if (rec.positiveCount !== 1 || rec.neutralCount !== 1 || rec.negativeCount !== 1) {
+      throw new Error(`pnz counts pos=${rec.positiveCount} neu=${rec.neutralCount} neg=${rec.negativeCount}`);
+    }
+  }
+
+  console.log("ANA-N registro sem perceived mas com métrica tem métrica amostrada; perceived insuficiente ainda");
+  {
+    const rows = [
+      makeMinimalRow({
+        entry_date: "2026-09-14",
+        treatments: ["Umectação"],
+        perceived_result: null,
+        definition: 4,
+      }),
+      makeMinimalRow({
+        entry_date: "2026-09-15",
+        treatments: ["Umectação"],
+        perceived_result: null,
+        definition: 5,
+      }),
+      makeMinimalRow({
+        entry_date: "2026-09-16",
+        treatments: ["Umectação"],
+        perceived_result: null,
+        definition: 3,
+      }),
+    ];
+    const r = computeTreatmentPatterns(rows);
+    const u = r.patterns.find((p) => p.treatment === "Umectação")!;
+    if (u.evaluatedPerceivedCount !== 0) {
+      throw new Error(`evaluatedPerceivedCount não 0: ${u.evaluatedPerceivedCount}`);
+    }
+    if (u.perceivedSufficiency !== false) throw new Error("perceivedSufficiency deveria false");
+    if (u.metricsSufficiency.definition !== true) {
+      throw new Error(`definition sufficiency não true: ${u.metricsSufficiency.definition}`);
+    }
+    if (u.metrics.definition.sampleCount !== 3) {
+      throw new Error(`definition sample: ${u.metrics.definition.sampleCount}`);
+    }
+    assertFiniteNumber("definition média Umectação", u.metrics.definition.average, (4 + 5 + 3) / 3);
+    if (u.hasEnoughData !== true) {
+      throw new Error(`hasEnoughData não true (métrica suficiente): ${u.hasEnoughData}`);
+    }
+  }
+
+  console.log("ANA-O comparação percebida entre duas janelas → médias e diferença");
+  {
+    const older = [
+      makeMinimalRow({ entry_date: "2026-08-01", perceived_result: "Neutro" }),
+      makeMinimalRow({ entry_date: "2026-08-05", perceived_result: "Bom" }),
+    ];
+    const recent = [
+      makeMinimalRow({ entry_date: "2026-09-10", perceived_result: "Muito bom" }),
+      makeMinimalRow({ entry_date: "2026-09-12", perceived_result: "Muito bom" }),
+    ];
+    const cmp = computePerceivedComparison(older, recent);
+    assertFiniteNumber("overall older", cmp.overall.olderAverage, (3 + 4) / 2);
+    assertFiniteNumber("overall recent", cmp.overall.recentAverage, (5 + 5) / 2);
+    assertFiniteNumber("overall diff", cmp.overall.difference, 5 - 3.5);
+    if (cmp.overall.olderSampleCount !== 2) {
+      throw new Error(`olderSample: ${cmp.overall.olderSampleCount}`);
+    }
+    if (cmp.overall.recentSampleCount !== 2) {
+      throw new Error(`recentSample: ${cmp.overall.recentSampleCount}`);
+    }
+  }
+
+  console.log("ANA-P janela anterior vazia → averages older null, difference null");
+  {
+    const older: DiaryEntryRow[] = [];
+    const recent = [
+      makeMinimalRow({ entry_date: "2026-09-14", perceived_result: "Bom", definition: 5 }),
+    ];
+    const cmp = computePerceivedComparison(older, recent);
+    if (cmp.overall.olderAverage !== null) {
+      throw new Error(`overall olderAverage não null: ${String(cmp.overall.olderAverage)}`);
+    }
+    if (cmp.overall.difference !== null) {
+      throw new Error(`overall difference não null: ${String(cmp.overall.difference)}`);
+    }
+    if (cmp.overall.recentSampleCount !== 1) {
+      throw new Error(`overall recentSample não 1: ${cmp.overall.recentSampleCount}`);
+    }
+    for (const m of ["frizz", "dryness", "oiliness", "definition", "shine", "breakage"] as const) {
+      if (m === "definition") {
+        assertFiniteNumber("definition recent", cmp.metrics.definition.recentAverage, 5);
+        if (cmp.metrics.definition.recentSampleCount !== 1) {
+          throw new Error("definition recentSample não 1");
+        }
+      }
+      if (cmp.metrics[m].olderAverage !== null) {
+        throw new Error(`${m} olderAverage não null: ${String(cmp.metrics[m].olderAverage)}`);
+      }
+      if (cmp.metrics[m].difference !== null) {
+        throw new Error(`${m} difference não null: ${String(cmp.metrics[m].difference)}`);
+      }
+    }
+  }
+
+  console.log("ANA-Q janela recente vazia → averages recent null, difference null");
+  {
+    const older = [
+      makeMinimalRow({ entry_date: "2026-08-10", perceived_result: "Ruim", breakage: 1 }),
+    ];
+    const recent: DiaryEntryRow[] = [];
+    const cmp = computePerceivedComparison(older, recent);
+    assertFiniteNumber("overall older", cmp.overall.olderAverage, 2);
+    if (cmp.overall.recentAverage !== null) {
+      throw new Error(`overall recent não null: ${String(cmp.overall.recentAverage)}`);
+    }
+    if (cmp.overall.difference !== null) {
+      throw new Error(`overall diff não null: ${String(cmp.overall.difference)}`);
+    }
+    assertFiniteNumber("breakage older", cmp.metrics.breakage.olderAverage, 1);
+    if (cmp.metrics.breakage.recentAverage !== null) throw new Error("breakage recent não null");
+    if (cmp.metrics.breakage.difference !== null) throw new Error("breakage diff não null");
+  }
+
+  console.log("ANA-R nenhuma divisão por zero / NaN / Infinity em shapes em bruto");
+  {
+    const cmp = computePerceivedComparison([], []);
+    const s = computeWeeklySummary([], new Date(2026, 8, 20, 12));
+    const t = computeTreatmentPatterns([]);
+    const shapes: unknown[] = [cmp, s, t, cmp.overall, ...Object.values(cmp.metrics), ...Object.values(s.metrics)];
+    for (const obj of shapes) {
+      if (typeof obj !== "object" || obj === null) continue;
+      for (const v of Object.values(obj as Record<string, unknown>)) {
+        if (typeof v === "number" && (Number.isNaN(v) || !Number.isFinite(v))) {
+          throw new Error(`NaN/Infinity em: ${JSON.stringify(obj)}`);
+        }
+        if (typeof v === "object" && v !== null) {
+          for (const vv of Object.values(v as Record<string, unknown>)) {
+            if (typeof vv === "number" && (Number.isNaN(vv) || !Number.isFinite(vv))) {
+              throw new Error(`NaN/Infinity nested: ${JSON.stringify(v)}`);
+            }
+          }
+        }
+      }
+    }
+    if (t.patterns.length !== 0) throw new Error(`patterns vazio: ${t.patterns.length}`);
+  }
+
+  console.log("ANA-S nenhum dado ausente transformado em zero (média ou count perceived)");
+  {
+    const rows = [
+      makeMinimalRow({
+        entry_date: "2026-09-14",
+        perceived_result: null,
+        frizz: null,
+        shine: null,
+        treatments: ["Hidratação"],
+      }),
+      makeMinimalRow({
+        entry_date: "2026-09-15",
+        perceived_result: "Bom",
+        frizz: 3,
+        shine: null,
+        treatments: ["Hidratação"],
+      }),
+    ];
+    const hid = computeTreatmentPatterns(rows).patterns.find((p) => p.treatment === "Hidratação")!;
+    if (hid.positiveCount !== 1) throw new Error(`positive não 1: ${hid.positiveCount}`);
+    if (hid.evaluatedPerceivedCount !== 1) {
+      throw new Error(`evaluatedPerceivedCount não 1: ${hid.evaluatedPerceivedCount}`);
+    }
+    if (hid.metrics.shine.sampleCount !== 0) {
+      throw new Error(`shine sample não 0: ${hid.metrics.shine.sampleCount}`);
+    }
+    if (hid.metrics.shine.average !== null) {
+      throw new Error(`shine average não null: ${String(hid.metrics.shine.average)}`);
+    }
+    const s = computeWeeklySummary(rows, new Date(2026, 8, 15, 12));
+    if (s.perceived.evaluatedCount !== 1) {
+      throw new Error(`weekly evaluatedCount não 1: ${s.perceived.evaluatedCount}`);
+    }
+    if (s.metrics.shine.average !== null) {
+      throw new Error(`weekly shine average não null: ${String(s.metrics.shine.average)}`);
+    }
+    if (s.metrics.shine.sampleCount !== 0) {
+      throw new Error(`weekly shine sample não 0: ${s.metrics.shine.sampleCount}`);
+    }
+  }
+
+  console.log("ANA-T nenhuma função altera arrays/rows de entrada (imutabilidade)");
+  {
+    const row1 = makeMinimalRow({
+      entry_date: "2026-09-14",
+      treatments: ["Lavagem", "Hidratação"],
+      perceived_result: "Bom",
+      shine: 4,
+    });
+    const row2 = makeMinimalRow({
+      entry_date: "2026-09-15",
+      treatments: ["Nutrição"],
+      perceived_result: null,
+    });
+    const r1TreatmentsOriginal = row1.treatments.slice();
+    const r2EntryOriginal = row2.entry_date;
+    const inputRows = [row1, row2];
+    const inputRowsOriginalLength = inputRows.length;
+    const originalReferences = [row1, row2];
+
+    computeWeeklySummary(inputRows, new Date(2026, 8, 15, 12));
+    computePerceivedComparison(inputRows.slice(0, 1), inputRows.slice(1));
+    computeTreatmentPatterns(inputRows);
+
+    if (inputRows.length !== inputRowsOriginalLength) {
+      throw new Error("input length alterado");
+    }
+    if (inputRows[0] !== originalReferences[0] || inputRows[1] !== originalReferences[1]) {
+      throw new Error("referências rows alteradas");
+    }
+    if (row1.treatments.join(",") !== r1TreatmentsOriginal.join(",")) {
+      throw new Error(`row1 treatments alterado: ${row1.treatments.join(",")}`);
+    }
+    if (row2.entry_date !== r2EntryOriginal) {
+      throw new Error(`row2 entry_date alterado: ${row2.entry_date}`);
+    }
   }
 }
 
@@ -716,6 +1218,7 @@ async function runIntegrationTests(userId: string) {
 
 async function main() {
   runStaticTests();
+  runAnalysisStaticTests();
   if (!RUN_INTEGRATION) {
     console.log(
       "DIARY_SERVICE_STATIC_OK (integração pulada — informe SUPABASE_SERVICE_ROLE_KEY e VITE_SUPABASE_* para rodar tudo)",

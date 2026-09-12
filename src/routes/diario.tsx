@@ -5,9 +5,12 @@ import { toast } from "sonner";
 import { SiteHeader } from "@/components/SiteHeader";
 import { FeatureAccessGuard } from "@/components/feature-access-guard";
 import { useAuth } from "@/hooks/use-auth";
-import { useDiaryEntriesList, useDiaryEntryByDate, useDiaryUpsertEntry } from "@/hooks/use-diary";
+import { useDiaryEntriesInRange, useDiaryEntriesList, useDiaryEntryByDate, useDiaryUpsertEntry } from "@/hooks/use-diary";
 import { DiaryEntryForm } from "@/components/diary/DiaryEntryForm";
 import { DiaryHistory } from "@/components/diary/DiaryHistory";
+import { TreatmentPatternsCard } from "@/components/diary/TreatmentPatternsCard";
+import { WeeklySummaryCard } from "@/components/diary/WeeklySummaryCard";
+import { computeTreatmentPatterns, computeWeeklySummary } from "@/lib/diary-analysis";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,6 +19,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const TAB_FORM = "form";
 const TAB_HISTORY = "history";
+const TAB_SUMMARY = "summary";
 
 const CIVIL_DATE_RE = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
@@ -89,6 +93,12 @@ function addDays(date: Date, days: number) {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0, 0);
   d.setDate(d.getDate() + days);
   return d;
+}
+
+function startOfWeekMonday(date: Date): Date {
+  const weekday = date.getDay();
+  const delta = weekday === 0 ? -6 : 1 - weekday;
+  return addDays(date, delta);
 }
 
 function formatHeaderDate(date: Date, isToday: boolean) {
@@ -179,6 +189,26 @@ function DiarioPage() {
     },
     [changeSelectedDate],
   );
+
+  const weekStartMonday = useMemo(() => startOfWeekMonday(today), [today]);
+  const weekRangeFromKey = useMemo(() => localCivilDateKey(weekStartMonday), [weekStartMonday]);
+  const weekRangeToKey = useMemo(() => localCivilDateKey(today), [today]);
+  const weekRange = useDiaryEntriesInRange(
+    { from: weekRangeFromKey, to: weekRangeToKey },
+    enabledEntry,
+  );
+  const weekRows = weekRange.data ?? [];
+
+  const weeklySummary = useMemo(
+    () => computeWeeklySummary(weekRows, today),
+    [weekRows, today],
+  );
+  const treatmentPatterns = useMemo(() => computeTreatmentPatterns(weekRows), [weekRows]);
+
+  const onRegisterToday = useCallback(() => {
+    changeSelectedDate(today);
+    setTab(TAB_FORM);
+  }, [changeSelectedDate, today]);
 
   const onLoadMore = useCallback(async () => {
     setPage((p) => p + 1);
@@ -278,6 +308,12 @@ function DiarioPage() {
               >
                 Histórico
               </TabsTrigger>
+              <TabsTrigger
+                value={TAB_SUMMARY}
+                className="rounded-full px-5 py-2 text-sm font-bold data-[state=active]:bg-gradient-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-glow"
+              >
+                Resumo
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value={TAB_FORM} className="mt-0">
@@ -337,6 +373,53 @@ function DiarioPage() {
                 selectedDate={selectedDate}
                 onRetry={() => list.refetch()}
               />
+            </TabsContent>
+
+            <TabsContent value={TAB_SUMMARY} className="mt-0 space-y-6">
+              {weekRange.error ? (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Não foi possível carregar o resumo da semana.</AlertTitle>
+                  <AlertDescription className="mt-2 flex items-center gap-2">
+                    <span>
+                      {(weekRange.error as Error)?.message ??
+                        "Tente novamente em alguns minutos."}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="rounded-full"
+                      onClick={() => weekRange.refetch()}
+                    >
+                      Tentar novamente
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+              {weekRange.isLoading && !weekRange.data ? (
+                <div className="space-y-6">
+                  <div className="rounded-xl border border-border bg-gradient-card p-6">
+                    <Skeleton className="h-6 w-48 mb-4" />
+                    <Skeleton className="h-8 w-72 mb-6" />
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <Skeleton className="h-28 w-full rounded-2xl" />
+                      <Skeleton className="h-28 w-full rounded-2xl" />
+                    </div>
+                  </div>
+                  <Skeleton className="h-64 w-full rounded-xl" />
+                </div>
+              ) : (
+                <>
+                  <WeeklySummaryCard
+                    summary={weeklySummary}
+                    onRegisterToday={onRegisterToday}
+                  />
+                  <TreatmentPatternsCard
+                    result={treatmentPatterns}
+                    onRegisterToday={onRegisterToday}
+                  />
+                </>
+              )}
             </TabsContent>
           </Tabs>
         </FeatureAccessGuard>
