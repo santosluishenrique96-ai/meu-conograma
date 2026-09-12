@@ -17,12 +17,16 @@ import {
   WandSparkles,
   Target,
   RefreshCw,
+  AlertTriangle,
+  ArrowRight,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
   DEFAULT_SCHEDULE_PREFS,
   ScheduleFocus,
   SchedulePrefsShape,
+  parseScheduleSource,
+  type ScheduleSource,
 } from "@/constants/schedule-defaults";
 import { FeatureAccessGuard } from "@/components/feature-access-guard";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -31,6 +35,17 @@ import { useDiaryEntriesInRange } from "@/hooks/use-diary";
 import { useFeatureAccess } from "@/hooks/use-subscription-permissions";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export const Route = createFileRoute("/cronograma")({
   head: () => ({
@@ -529,6 +544,12 @@ function CronogramaPage() {
   const [saving, setSaving] = useState(false);
   const [selectedConcerns, setSelectedConcerns] = useState<string[]>([]);
   const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
+  const [scheduleMode, setScheduleMode] = useState<ScheduleSource>("app");
+  const [pendingSwitchMode, setPendingSwitchMode] = useState<ScheduleSource | null>(null);
+  const [lastSavedSnapshot, setLastSavedSnapshot] = useState<{
+    readonly prefs: Prefs;
+    readonly mode: ScheduleSource;
+  }>({ prefs: { ...DEFAULT_PREFS }, mode: "app" });
   const customScheduleAccess = useFeatureAccess("cronograma-personalizado", Boolean(user));
   const diagnosisAccess = useFeatureAccess("diagnostico-capilar", Boolean(user));
   const canUseCustomSchedule = customScheduleAccess.data?.hasAccess ?? false;
@@ -549,8 +570,8 @@ function CronogramaPage() {
       .eq("user_id", user.id)
       .maybeSingle()
       .then(({ data }) => {
-        if (data)
-          setPrefs({
+        if (data) {
+          const loadedPrefs: Prefs = {
             hair_type: data.hair_type,
             goal: data.goal,
             monday: parseFocusType(data.monday),
@@ -560,7 +581,14 @@ function CronogramaPage() {
             friday: parseFocusType(data.friday),
             saturday: parseFocusType(data.saturday),
             sunday: parseFocusType(data.sunday),
-          });
+          };
+          const loadedMode = parseScheduleSource(data.schedule_source);
+          setPrefs(loadedPrefs);
+          setScheduleMode(loadedMode);
+          setLastSavedSnapshot({ prefs: { ...loadedPrefs }, mode: loadedMode });
+        } else {
+          setLastSavedSnapshot({ prefs: { ...DEFAULT_PREFS }, mode: "app" });
+        }
       });
   }, [canUseCustomSchedule, user]);
 
@@ -625,16 +653,51 @@ function CronogramaPage() {
       return;
     }
     setSaving(true);
+    const source: ScheduleSource =
+      scheduleMode === "app" || scheduleMode === "own" ? scheduleMode : "app";
     const { error } = await supabase
       .from("schedule_preferences")
-      .upsert({ user_id: user.id, ...nextPrefs }, { onConflict: "user_id" });
+      .upsert(
+        { user_id: user.id, ...nextPrefs, schedule_source: source },
+        { onConflict: "user_id" },
+      );
     setSaving(false);
     if (error) toast.error("Erro ao salvar");
     else {
       toast.success("Cronograma personalizado!");
       setShowSettings(false);
       setPrefs(nextPrefs);
+      setLastSavedSnapshot({ prefs: { ...nextPrefs }, mode: source });
     }
+  };
+
+  const handleScheduleModeChange = (next: string) => {
+    if (next !== "app" && next !== "own") return;
+    const nextMode: ScheduleSource = next;
+    if (nextMode === scheduleMode) return;
+    if (scheduleMode === "own" && nextMode === "app") {
+      setPendingSwitchMode(nextMode);
+      return;
+    }
+    setScheduleMode(nextMode);
+  };
+
+  const confirmPendingSwitch = () => {
+    if (pendingSwitchMode === "app" || pendingSwitchMode === "own") {
+      setScheduleMode(pendingSwitchMode);
+    }
+    setPendingSwitchMode(null);
+  };
+
+  const cancelPendingSwitch = () => {
+    setPendingSwitchMode(null);
+  };
+
+  const cancelSettings = () => {
+    setPrefs({ ...lastSavedSnapshot.prefs });
+    setScheduleMode(lastSavedSnapshot.mode);
+    setPendingSwitchMode(null);
+    setShowSettings(false);
   };
 
   const toggle = (key: string) => {
@@ -720,7 +783,10 @@ function CronogramaPage() {
             </p>
           </div>
           <button
-            onClick={() => setShowSettings((s) => !s)}
+            onClick={() => {
+              if (showSettings) cancelSettings();
+              else setShowSettings(true);
+            }}
             disabled={checkingCustomScheduleAccess}
             className="inline-flex items-center gap-2 rounded-full border border-border bg-card/50 px-4 py-2 text-sm font-bold transition-smooth hover:border-primary hover:text-primary"
           >
@@ -942,46 +1008,131 @@ function CronogramaPage() {
                 </div>
               </div>
 
-              <div className="mt-6 grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                    Tipo de cabelo
-                  </label>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {HAIR_TYPES.map((h) => (
+              <Tabs
+                value={scheduleMode}
+                onValueChange={handleScheduleModeChange}
+                className="w-full mt-6"
+              >
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="app">Sugerido pelo Meu Cronograma</TabsTrigger>
+                  <TabsTrigger value="own">Meu próprio cronograma</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="app" className="mt-6">
+                  <div className="rounded-2xl border border-border bg-background/50 p-4">
+                    <div className="inline-flex items-center gap-2 text-sm font-bold text-primary">
+                      <Target className="h-4 w-4" /> Objetivo sugerido
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      O sistema recomenda focar em{" "}
+                      <strong className="text-foreground">
+                        {canUseDiagnosis ? diagnosis.recommendedGoal : "Indisponivel no seu plano"}
+                      </strong>{" "}
+                      neste momento, porque esse caminho conversa melhor com os sinais que seu
+                      cabelo está mostrando.
+                    </p>
+                    {canUseDiagnosis && (
                       <button
-                        key={h}
-                        onClick={() => setPrefs((p) => ({ ...p, hair_type: h }))}
-                        className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-smooth ${prefs.hair_type === h ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+                        type="button"
+                        onClick={applySuggestedRoutine}
+                        className="mt-4 inline-flex items-center gap-2 rounded-full bg-gradient-primary px-5 py-2 text-sm font-bold text-primary-foreground shadow-glow transition-smooth hover:scale-105"
                       >
-                        {h}
+                        <RefreshCw className="h-4 w-4" /> Aplicar sugestão ao cronograma
                       </button>
-                    ))}
+                    )}
                   </div>
-                </div>
-                <div>
-                  <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                    Objetivo principal
-                  </label>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {GOALS.map((g) => (
-                      <button
-                        key={g}
-                        onClick={() => setPrefs((p) => ({ ...p, goal: g }))}
-                        className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-smooth ${prefs.goal === g ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
-                      >
-                        {g}
-                      </button>
-                    ))}
+
+                  <div className="mt-6 grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                        Tipo de cabelo
+                      </label>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {HAIR_TYPES.map((h) => (
+                          <button
+                            key={h}
+                            onClick={() => setPrefs((p) => ({ ...p, hair_type: h }))}
+                            className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-smooth ${prefs.hair_type === h ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+                          >
+                            {h}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                        Objetivo principal
+                      </label>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {GOALS.map((g) => (
+                          <button
+                            key={g}
+                            onClick={() => setPrefs((p) => ({ ...p, goal: g }))}
+                            className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-smooth ${prefs.goal === g ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+                          >
+                            {g}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        Sugestão atual do teste:{" "}
+                        <span className="font-semibold text-foreground">
+                          {canUseDiagnosis
+                            ? diagnosis.recommendedGoal
+                            : "Indisponivel no seu plano"}
+                        </span>
+                      </p>
+                    </div>
                   </div>
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    Sugestão atual do teste:{" "}
-                    <span className="font-semibold text-foreground">
-                      {canUseDiagnosis ? diagnosis.recommendedGoal : "Indisponivel no seu plano"}
-                    </span>
-                  </p>
-                </div>
-              </div>
+                </TabsContent>
+
+                <TabsContent value="own" className="mt-6">
+                  <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4">
+                    <div className="inline-flex items-center gap-2 text-sm font-bold text-primary">
+                      <WandSparkles className="h-4 w-4" /> Monte seu cronograma manualmente
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Defina qual cuidado quer em cada dia da semana. O Meu Cronograma não ajustará
+                      esses valores automaticamente.
+                    </p>
+                  </div>
+
+                  <div className="mt-6 grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                        Tipo de cabelo
+                      </label>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {HAIR_TYPES.map((h) => (
+                          <button
+                            key={h}
+                            onClick={() => setPrefs((p) => ({ ...p, hair_type: h }))}
+                            className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-smooth ${prefs.hair_type === h ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+                          >
+                            {h}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                        Objetivo principal
+                      </label>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {GOALS.map((g) => (
+                          <button
+                            key={g}
+                            onClick={() => setPrefs((p) => ({ ...p, goal: g }))}
+                            className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-smooth ${prefs.goal === g ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+                          >
+                            {g}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </TabsContent>
+              </Tabs>
 
               <div className="mt-6">
                 <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
@@ -1019,7 +1170,7 @@ function CronogramaPage() {
                   <Save className="h-4 w-4" /> {saving ? "Salvando..." : "Salvar personalização"}
                 </button>
                 <button
-                  onClick={() => setShowSettings(false)}
+                  onClick={cancelSettings}
                   className="rounded-full border border-border px-6 py-2.5 text-sm font-bold text-muted-foreground hover:text-foreground transition-smooth"
                 >
                   Cancelar
@@ -1317,6 +1468,28 @@ function CronogramaPage() {
           <Sparkles className="h-5 w-5 text-primary" />
         </Link>
       </div>
+
+      <AlertDialog open={pendingSwitchMode !== null} onOpenChange={() => cancelPendingSwitch()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" /> Sair do modo Meu próprio
+              cronograma?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Ao voltar para o modo <strong>Sugerido pelo Meu Cronograma</strong>, os ajustes
+              inteligentes futuros poderão sobrescrever os valores definidos manualmente. Seus dias
+              da semana atuais não serão alterados agora — apenas a marcação de origem.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={cancelPendingSwitch}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmPendingSwitch}>
+              Continuar para Sugerido <ArrowRight className="h-4 w-4 ml-1" />
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

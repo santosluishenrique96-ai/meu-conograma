@@ -1,4 +1,9 @@
-import { DEFAULT_SCHEDULE_PREFS } from "@/constants/schedule-defaults";
+import {
+  DEFAULT_SCHEDULE_PREFS,
+  parseScheduleSource,
+  type ScheduleFocus,
+  type ScheduleSource,
+} from "@/constants/schedule-defaults";
 import { supabase } from "@/integrations/supabase/client";
 import { DIARY_PERCEIVED_RESULTS, DIARY_PERCEPTION_METRICS, DIARY_TREATMENTS } from "@/types/diary";
 import type {
@@ -26,10 +31,55 @@ type ScheduleSnapshotSource = Pick<
   | "friday"
   | "saturday"
   | "sunday"
+  | "schedule_source"
 >;
 
 const ALLOWED_TREATMENTS = new Set<string>(DIARY_TREATMENTS);
 const ALLOWED_RESULTS = new Set<string>(DIARY_PERCEIVED_RESULTS);
+
+function parseScheduleFocus(value: unknown): ScheduleFocus | null {
+  if (
+    value === "Hidratação" ||
+    value === "Nutrição" ||
+    value === "Reconstrução" ||
+    value === "Descanso" ||
+    value === "Cuidado"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+export function parseSavedScheduleSnapshot(raw: unknown): ScheduleFocusSnapshot | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return null;
+  }
+  const r = raw as Record<string, unknown>;
+
+  const weekdayRaw = typeof r.weekday === "string" ? r.weekday : null;
+  const weekdayIsValid =
+    weekdayRaw === "sunday" ||
+    weekdayRaw === "monday" ||
+    weekdayRaw === "tuesday" ||
+    weekdayRaw === "wednesday" ||
+    weekdayRaw === "thursday" ||
+    weekdayRaw === "friday" ||
+    weekdayRaw === "saturday";
+  if (!weekdayIsValid) return null;
+  const weekday = weekdayRaw as ScheduleFocusSnapshot["weekday"];
+
+  const focus = parseScheduleFocus(r.focus);
+  if (!focus) return null;
+
+  const hair_type = typeof r.hair_type === "string" ? r.hair_type : null;
+  const goal = typeof r.goal === "string" ? r.goal : null;
+
+  const sourceRaw = r.schedule_source;
+  const schedule_source: ScheduleSource | null =
+    sourceRaw === "app" || sourceRaw === "own" ? sourceRaw : null;
+
+  return { weekday, focus, hair_type, goal, schedule_source };
+}
 
 export type DiaryEntryPayloadShape = {
   treatments?: DiaryTreatment[];
@@ -158,14 +208,25 @@ export function buildScheduleFocusSnapshot(
     "saturday",
   ] as const;
   const key = weekdayKeys[weekdayIndex];
-  const focus = effective[key] ?? null;
-  if (!focus || typeof focus !== "string") return null;
+  const rawFocus = effective[key] ?? null;
+  if (!rawFocus || typeof rawFocus !== "string") return null;
+  const focus = parseScheduleFocus(rawFocus);
+  if (!focus) return null;
+
   const hairType = effective.hair_type ?? null;
   const goal = effective.goal ?? null;
-  const snapshot: ScheduleFocusSnapshot = { weekday: key, focus };
-  if (hairType) snapshot.hair_type = hairType;
-  if (goal) snapshot.goal = goal;
-  return snapshot;
+
+  const schedule_source: ScheduleSource | null = prefs
+    ? parseScheduleSource(prefs.schedule_source)
+    : null;
+
+  return {
+    weekday: key,
+    focus,
+    hair_type: typeof hairType === "string" ? hairType : null,
+    goal: typeof goal === "string" ? goal : null,
+    schedule_source,
+  };
 }
 
 async function getSchedulePreferencesForUser(

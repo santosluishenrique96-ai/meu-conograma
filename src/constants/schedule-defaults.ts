@@ -1,5 +1,11 @@
 export type ScheduleFocus = "Hidratação" | "Nutrição" | "Reconstrução" | "Descanso" | "Cuidado";
 
+export type ScheduleSource = "app" | "own";
+
+export function parseScheduleSource(value: unknown): ScheduleSource {
+  return value === "app" || value === "own" ? value : "app";
+}
+
 export type ScheduleFocusWeek<TFocus = ScheduleFocus> = {
   readonly monday: TFocus;
   readonly tuesday: TFocus;
@@ -17,6 +23,13 @@ export type SchedulePrefsShape<
   readonly hair_type: TText;
   readonly goal: TText;
 } & ScheduleFocusWeek<TFocus>;
+
+export type SchedulePrefsWithSource<
+  TText extends string | null = string | null,
+  TFocus = ScheduleFocus,
+> = SchedulePrefsShape<TText, TFocus> & {
+  readonly schedule_source?: ScheduleSource | TText;
+};
 
 export type DefaultSchedulePrefs = SchedulePrefsShape<null, ScheduleFocus>;
 

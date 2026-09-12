@@ -6,7 +6,9 @@ import {
   type DiaryEntryRow,
   type DiaryPerceivedResult,
   type DiaryPerceptionMetric,
+  type ScheduleFocusSnapshot,
 } from "@/types/diary";
+import { parseSavedScheduleSnapshot } from "@/services/diary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -78,22 +80,22 @@ type SafeSnapshot = {
   weekday: string | null;
   focus: string | null;
   hair_type: string | null;
+  goal: string | null;
+  schedule_source: string | null;
 };
 
-function asPlainObject(v: unknown): null | Record<string, unknown> {
-  if (v == null) return null;
-  if (typeof v !== "object") return null;
-  if (Array.isArray(v)) return null;
-  return v as Record<string, unknown>;
-}
-
 function toSafeSnapshot(v: unknown): SafeSnapshot {
-  const obj = asPlainObject(v);
-  if (!obj) return { weekday: null, focus: null, hair_type: null };
-  const weekday = typeof obj.weekday === "string" ? obj.weekday : null;
-  const focus = typeof obj.focus === "string" ? obj.focus : null;
-  const hair_type = typeof obj.hair_type === "string" ? obj.hair_type : null;
-  return { weekday, focus, hair_type };
+  const parsed = parseSavedScheduleSnapshot(v);
+  if (!parsed) {
+    return { weekday: null, focus: null, hair_type: null, goal: null, schedule_source: null };
+  }
+  return {
+    weekday: parsed.weekday,
+    focus: parsed.focus,
+    hair_type: parsed.hair_type,
+    goal: parsed.goal,
+    schedule_source: parsed.schedule_source,
+  };
 }
 
 export function DiaryEntryCard({ entry, onEdit, className }: DiaryEntryCardProps) {

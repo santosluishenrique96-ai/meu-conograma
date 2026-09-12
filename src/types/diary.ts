@@ -1,4 +1,5 @@
 import type { Tables, TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
+import type { ScheduleFocus, ScheduleSource } from "@/constants/schedule-defaults";
 
 export const DIARY_TREATMENTS = [
   "Lavagem",
@@ -38,9 +39,10 @@ export type DiaryPerceptionScale = 1 | 2 | 3 | 4 | 5;
 
 export type ScheduleFocusSnapshot = {
   weekday: "sunday" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday";
-  focus: string;
-  hair_type?: string | null;
-  goal?: string | null;
+  focus: ScheduleFocus;
+  hair_type: string | null;
+  goal: string | null;
+  schedule_source: ScheduleSource | null;
 };
 
 export type DiaryEntryRow = Tables<"diary_entries">;
