@@ -29,6 +29,8 @@ import {
   type IntelligenceSignal,
   type IntelligenceSuggestion,
   type ProposedScheduleChange,
+  type DiaryIntelligenceScheduleContext,
+  type ProposedScheduleChangeDay,
 } from "../src/lib/diary-intelligence";
 import type {
   DiaryEntryRow,
@@ -40,6 +42,9 @@ import type { TreatmentPattern } from "../src/lib/diary-analysis";
 import { DIARY_TREATMENTS } from "../src/types/diary";
 import { emptyProposedScheduleChange } from "../src/lib/diary-intelligence";
 import { _isIntelligenceConfidenceForTesting } from "../src/lib/diary-intelligence";
+import type { ScheduleFocus, ScheduleSource } from "../src/constants/schedule-defaults";
+import { DEFAULT_SCHEDULE_PREFS } from "../src/constants/schedule-defaults";
+import type { ScheduleFocusWeek } from "../src/constants/schedule-defaults";
 
 let pass = 0;
 let total = 0;
@@ -774,6 +779,417 @@ test("45 recurring dryness sample 4 → nenhum sinal", () => {
   const r1 = buildConsecutiveRowsWith(["Umectação"], 0, 4, "Bom" as DiaryPerceivedResult, { dryness: 5 as DiaryPerceptionScale });
   const r = computeDiaryIntelligence({ rows: r1, today: REFERENCE_TODAY });
   return assertFalse(hasSignalId(r.signals, "recurring_dryness", "Umectação"), "dryness insuf sample");
+});
+
+function cloneDefaultWeeklySchedule(): ScheduleFocusWeek<ScheduleFocus> {
+  return {
+    monday: DEFAULT_SCHEDULE_PREFS.monday,
+    tuesday: DEFAULT_SCHEDULE_PREFS.tuesday,
+    wednesday: DEFAULT_SCHEDULE_PREFS.wednesday,
+    thursday: DEFAULT_SCHEDULE_PREFS.thursday,
+    friday: DEFAULT_SCHEDULE_PREFS.friday,
+    saturday: DEFAULT_SCHEDULE_PREFS.saturday,
+    sunday: DEFAULT_SCHEDULE_PREFS.sunday,
+  };
+}
+
+function buildScheduleContext(
+  weeklyOverrides: Partial<ScheduleFocusWeek<ScheduleFocus>> = {},
+  source: ScheduleSource = "app",
+): DiaryIntelligenceScheduleContext {
+  const base = cloneDefaultWeeklySchedule();
+  const w: ScheduleFocusWeek<ScheduleFocus> = { ...base, ...weeklyOverrides };
+  return { source, weeklySchedule: Object.freeze(w) };
+}
+
+function buildNegativeRowsFor(treatment: DiaryTreatment): readonly DiaryEntryRow[] {
+  const r1 = buildConsecutiveRowsWith([treatment], 0, 3, "Ruim" as DiaryPerceivedResult);
+  const r2 = buildConsecutiveRowsWith([treatment], -3, 3, "Muito ruim" as DiaryPerceivedResult);
+  const r3 = buildConsecutiveRowsWith([treatment], -6, 4, "Neutro" as DiaryPerceivedResult);
+  return [...r1, ...r2, ...r3];
+}
+
+function findNegativeSuggestionFor(
+  suggestions: readonly IntelligenceSuggestion[],
+  treatment: DiaryTreatment,
+): IntelligenceSuggestion | undefined {
+  return suggestions.find(
+    (s) =>
+      s.id === "observe_treatment_response" &&
+      s.evidence.type === "treatment_perceived_pattern" &&
+      s.evidence.treatment === treatment,
+  );
+}
+
+function firstChangeEntry(s: ProposedScheduleChange | null) {
+  return s && s.entries.length > 0 ? s.entries[0] : null;
+}
+
+test("46 negative + app + frequência 2 → proposta 2→1", () => {
+  const rows = buildNegativeRowsFor("Nutrição");
+  // default: wednesday=Nutrição (freq 1). Para freq=2 adicionamos friday também.
+  const ctx = buildScheduleContext({ friday: "Nutrição" });
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const sug = findNegativeSuggestionFor(r.suggestions, "Nutrição");
+  const change = sug?.proposedScheduleChange ?? null;
+  const entry = firstChangeEntry(change);
+  return assertTrue(!!sug, "sug existe Nutrição") &&
+    assertEqual(change?.changeType, "reduce_frequency", "changeType reduce") &&
+    assertEqual(change?.currentWeeklyFrequency, 2, "currentFreq=2") &&
+    assertEqual(change?.proposedWeeklyFrequency, 1, "proposedFreq=1") &&
+    assertEqual(entry?.action, "reduce_frequency", "entry action reduce") &&
+    assertEqual(entry?.treatment, "Nutrição", "entry treatment Nutrição") &&
+    assertEqual(change?.treatment, "Nutrição", "top-level treatment");
+});
+
+test("47 negative + app + frequência 3 → proposta 3→2", () => {
+  const rows = buildNegativeRowsFor("Hidratação");
+  // default: monday=Hidratação, friday=Hidratação (2). +tuesday para 3.
+  const ctx = buildScheduleContext({ tuesday: "Hidratação" });
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const sug = findNegativeSuggestionFor(r.suggestions, "Hidratação");
+  const change = sug?.proposedScheduleChange ?? null;
+  return assertTrue(!!sug, "sug existe Hidratação") &&
+    assertEqual(change?.currentWeeklyFrequency, 3, "current 3") &&
+    assertEqual(change?.proposedWeeklyFrequency, 2, "proposed 2") &&
+    assertFiniteNumber(change?.entries.length ?? NaN, "entries length", 1);
+});
+
+test("48 negative + frequência 1 → null", () => {
+  const rows = buildNegativeRowsFor("Nutrição");
+  const ctx = buildScheduleContext(); // default Nutrição = quarta (1x)
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const sug = findNegativeSuggestionFor(r.suggestions, "Nutrição");
+  return assertTrue(!!sug, "sug existe") &&
+    assertEqual(sug.proposedScheduleChange, null, "change null freq1");
+});
+
+test("49 positive + frequência 2 → null", () => {
+  const rows1 = buildConsecutiveRowsWith(["Hidratação"], 0, 7, "Bom" as DiaryPerceivedResult);
+  const rows2 = buildConsecutiveRowsWith(["Hidratação"], -7, 3, "Neutro" as DiaryPerceivedResult);
+  const rows = [...rows1, ...rows2];
+  const ctx = buildScheduleContext(); // default Hidratação 2x (seg+sex)
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const positiveSug = r.suggestions.find((s) => s.id === "continue_current_pattern");
+  return assertTrue(!!positiveSug, "positive sug existe") &&
+    assertEqual(positiveSug.proposedScheduleChange, null, "positive sem change");
+});
+
+test("50 recurring_dryness + frequência 2 tratamento ajustável → null", () => {
+  const r1 = buildConsecutiveRowsWith(["Umectação"], 0, 3, "Bom" as DiaryPerceivedResult, { dryness: 5 as DiaryPerceptionScale });
+  const r2 = buildConsecutiveRowsWith(["Umectação"], -3, 2, "Neutro" as DiaryPerceivedResult, { dryness: 4 as DiaryPerceptionScale });
+  const rows = [...r1, ...r2];
+  const ctx = buildScheduleContext({ tuesday: "Hidratação", thursday: "Hidratação" });
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const drySug = r.suggestions.find((s) => s.id === "review_metric_pattern");
+  return assertTrue(!!drySug, "dryness sug existe") &&
+    assertEqual(drySug.proposedScheduleChange, null, "dryness sem change");
+});
+
+test("51 recent_perceived_lower → null", () => {
+  const prev = buildConsecutiveRowsWith(["Hidratação"], -14, 4, "Bom" as DiaryPerceivedResult);
+  const rec = buildConsecutiveRowsWith(["Hidratação"], 0, 4, "Neutro" as DiaryPerceivedResult);
+  const rows = [...prev, ...rec];
+  const ctx = buildScheduleContext();
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const lowerSug = r.suggestions.find((s) => s.summaryKey === "recent_perceived_lower");
+  return assertTrue(!!lowerSug, "lower sug existe") &&
+    assertEqual(lowerSug.proposedScheduleChange, null, "lower sem change");
+});
+
+test("52 recent_perceived_higher → null", () => {
+  const prev = buildConsecutiveRowsWith(["Hidratação"], -14, 4, "Neutro" as DiaryPerceivedResult);
+  const rec = buildConsecutiveRowsWith(["Hidratação"], 0, 4, "Bom" as DiaryPerceivedResult);
+  const rows = [...prev, ...rec];
+  const ctx = buildScheduleContext();
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const higherSug = r.suggestions.find((s) => s.summaryKey === "recent_perceived_higher");
+  return assertTrue(!!higherSug, "higher sug existe") &&
+    assertEqual(higherSug.proposedScheduleChange, null, "higher sem change");
+});
+
+test("53 source own + negative + frequência 2 → null", () => {
+  const rows = buildNegativeRowsFor("Nutrição");
+  const ctx = buildScheduleContext({ friday: "Nutrição" }, "own");
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const sug = findNegativeSuggestionFor(r.suggestions, "Nutrição");
+  return assertTrue(!!sug, "sug existe own") &&
+    assertEqual(sug.proposedScheduleChange, null, "change null own");
+});
+
+test("54 sem scheduleContext → null (mesmo elegível)", () => {
+  const rows = buildNegativeRowsFor("Nutrição");
+  const ctx = buildScheduleContext({ friday: "Nutrição" });
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY });
+  const sug = findNegativeSuggestionFor(r.suggestions, "Nutrição");
+  // contexto ctx só usado para confirmar que o dado é elegível em outro teste; aqui:
+  void ctx;
+  return assertTrue(!!sug, "sug existe sem ctx") &&
+    assertEqual(sug.proposedScheduleChange, null, "change null sem ctx");
+});
+
+test("55 affectedDay = última ocorrência semanal", () => {
+  const rows = buildNegativeRowsFor("Hidratação");
+  // seg=Hidratação (default), quarta=Hidratação (override), sábado=Hidratação (override), friday NÃO é Hidratação para total 3. Última = sábado.
+  const ctx = buildScheduleContext({ wednesday: "Hidratação", saturday: "Hidratação", friday: "Descanso" });
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const sug = findNegativeSuggestionFor(r.suggestions, "Hidratação");
+  const entry = firstChangeEntry(sug?.proposedScheduleChange ?? null);
+  return assertTrue(!!sug, "sug 3x existe") &&
+    assertEqual(sug.proposedScheduleChange?.currentWeeklyFrequency, 3, "freq=3 seg+qua+sáb") &&
+    assertEqual(entry?.affectedDay, "saturday", "última = sábado") &&
+    assertEqual(entry?.day, "saturday", "day coincide com affectedDay");
+});
+
+test("56 primeira ocorrência preservada (não é a afetada)", () => {
+  const rows = buildNegativeRowsFor("Hidratação");
+  const ctx = buildScheduleContext({ wednesday: "Hidratação", saturday: "Hidratação", friday: "Descanso" });
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const sug = findNegativeSuggestionFor(r.suggestions, "Hidratação");
+  const entry = firstChangeEntry(sug?.proposedScheduleChange ?? null);
+  // primeira ocorrência é monday (default). Entrada afetada NÃO é monday.
+  return assertTrue(!!entry, "entry existe") &&
+    assertNotEqual(entry.day, "monday", "primeira (seg) não afetada");
+});
+
+function assertNotEqual<T>(actual: T, expected: T, label: string): boolean {
+  if (!Object.is(actual, expected)) return true;
+  console.error(`  assertNotEqual failed: ${label} actual=${String(actual)} expectedNot=${String(expected)}`);
+  return false;
+}
+
+test("57 nunca reduz mais de 1 por proposta", () => {
+  const rows = buildNegativeRowsFor("Hidratação");
+  // 4 ocorrências: seg (default), ter, qua, qui. Friday sobrescrito para não ser Hidratação.
+  const ctx = buildScheduleContext({ tuesday: "Hidratação", wednesday: "Hidratação", thursday: "Hidratação", friday: "Descanso" });
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const sug = findNegativeSuggestionFor(r.suggestions, "Hidratação");
+  return assertTrue(!!sug, "sug 4x existe") &&
+    assertEqual(sug.proposedScheduleChange?.currentWeeklyFrequency, 4, "current 4") &&
+    assertEqual(sug.proposedScheduleChange?.proposedWeeklyFrequency, 3, "proposed = 4-1=3");
+});
+
+test("58 nunca propõe frequência zero", () => {
+  const rows2 = buildNegativeRowsFor("Nutrição");
+  const ctx2 = buildScheduleContext({ friday: "Nutrição" });
+  const r2 = computeDiaryIntelligence({ rows: rows2, today: REFERENCE_TODAY, scheduleContext: ctx2 });
+  const sug2 = findNegativeSuggestionFor(r2.suggestions, "Nutrição");
+  const rows1 = buildNegativeRowsFor("Nutrição");
+  const ctx1 = buildScheduleContext(); // Nutrição freq 1
+  const r1 = computeDiaryIntelligence({ rows: rows1, today: REFERENCE_TODAY, scheduleContext: ctx1 });
+  const sug1 = findNegativeSuggestionFor(r1.suggestions, "Nutrição");
+  return assertEqual(sug2.proposedScheduleChange?.proposedWeeklyFrequency ?? NaN, 1, "proposed >=1 para 2→1") &&
+    assertEqual(sug1.proposedScheduleChange, null, "1 → null, nunca 0");
+});
+
+test("59 tratamento não ajustável (Umectação) negative → null", () => {
+  const rows = buildNegativeRowsFor("Umectação");
+  const ctx = buildScheduleContext({ tuesday: "Nutrição", thursday: "Nutrição" });
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const negSug = r.suggestions.find(
+    (s) =>
+      s.id === "observe_treatment_response" &&
+      s.evidence.type === "treatment_perceived_pattern" &&
+      s.evidence.treatment === "Umectação",
+  );
+  return assertTrue(!!negSug, "sug Umectação negative existe") &&
+    assertEqual(negSug.proposedScheduleChange, null, "não ajustável null");
+});
+
+test("60 duas treatments negativas elegíveis → uma proposta por tratamento", () => {
+  const rowsN = buildNegativeRowsFor("Nutrição");
+  const rowsH = buildNegativeRowsFor("Hidratação");
+  const rows = [...rowsN, ...rowsH];
+  // Ambos >=2: Nutrição wed+thursday, Hidratação monday+friday+saturday → 3
+  const ctx = buildScheduleContext({ thursday: "Nutrição", saturday: "Hidratação" });
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const sugN = findNegativeSuggestionFor(r.suggestions, "Nutrição");
+  const sugH = findNegativeSuggestionFor(r.suggestions, "Hidratação");
+  return assertTrue(!!sugN && !!sugH, "ambas sugestões existem") &&
+    assertEqual(sugN.proposedScheduleChange?.treatment, "Nutrição", "proposta Nutrição") &&
+    assertEqual(sugH.proposedScheduleChange?.treatment, "Hidratação", "proposta Hidratação") &&
+    assertNotEqual(sugN.proposedScheduleChange, null, "Nutrição change existe") &&
+    assertNotEqual(sugH.proposedScheduleChange, null, "Hidratação change existe");
+});
+
+test("61 nenhuma proposta duplicada para mesmo treatment", () => {
+  const rows = buildNegativeRowsFor("Hidratação");
+  const ctx = buildScheduleContext({ wednesday: "Hidratação", saturday: "Hidratação" }); // 3 ocorrências
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const hidrSuggs = r.suggestions.filter(
+    (s) =>
+      s.evidence.type === "treatment_perceived_pattern" &&
+      s.evidence.treatment === "Hidratação" &&
+      s.proposedScheduleChange !== null,
+  );
+  return assertEqual(hidrSuggs.length, 1, "exatamente 1 sugestão com change pro Hidratação");
+});
+
+test("62 todas propostas exigem confirmação explícita", () => {
+  const rowsN = buildNegativeRowsFor("Nutrição");
+  const rowsH = buildNegativeRowsFor("Hidratação");
+  const rows = [...rowsN, ...rowsH];
+  const ctx = buildScheduleContext({ thursday: "Nutrição", saturday: "Hidratação" });
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const changes = r.suggestions
+    .filter((s) => s.proposedScheduleChange !== null)
+    .flatMap((s) => s.proposedScheduleChange!.entries);
+  return assertTrue(r.suggestions.every((s) => s.applicability.requiresExplicitConfirmation === true), "suggestion applicability explicit") &&
+    assertTrue(changes.length >= 2, "há entries") &&
+    assertTrue(changes.every((e) => e.requiresExplicitConfirmation === true), "entries também explicit");
+});
+
+test("63 nenhum auto-apply (todas requiresExplicitConfirmation)", () => {
+  const rows = buildNegativeRowsFor("Nutrição");
+  const ctxApp = buildScheduleContext({ friday: "Nutrição" });
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctxApp });
+  return assertTrue(r.suggestions.length >= 1, "sug existem") &&
+    assertTrue(r.suggestions.every(suggestionHasNoAutoApply), "todas sem auto-apply");
+});
+
+test("64 nenhuma mutation do scheduleContext (deepFreeze)", () => {
+  const rows = buildNegativeRowsFor("Nutrição");
+  const ctx = buildScheduleContext({ friday: "Nutrição" });
+  deepFreezeIfObject(ctx);
+  deepFreezeIfObject(ctx.weeklySchedule);
+  try {
+    computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+    return true;
+  } catch (err) {
+    console.error(`  mutabilidade detectada scheduleCtx: ${(err as Error).message}`);
+    return false;
+  }
+});
+
+test("65 ordem das rows não muda propostas (determinismo propostas)", () => {
+  const rowsN = buildNegativeRowsFor("Nutrição");
+  const rowsH = buildNegativeRowsFor("Hidratação");
+  const rows1 = [...rowsN, ...rowsH];
+  const rows2 = [...rowsH, ...rowsN];
+  const ctx = buildScheduleContext({ thursday: "Nutrição", saturday: "Hidratação" });
+  deepFreezeIfObject(ctx);
+  deepFreezeIfObject(ctx.weeklySchedule);
+  const r1 = computeDiaryIntelligence({ rows: rows1, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const r2 = computeDiaryIntelligence({ rows: rows2, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const sum1 = r1.suggestions
+    .filter((s) => s.proposedScheduleChange !== null)
+    .map((s) => `${s.proposedScheduleChange!.treatment}:${s.proposedScheduleChange!.currentWeeklyFrequency}→${s.proposedScheduleChange!.proposedWeeklyFrequency}:${firstChangeEntry(s.proposedScheduleChange)?.day}`)
+    .sort()
+    .join("|");
+  const sum2 = r2.suggestions
+    .filter((s) => s.proposedScheduleChange !== null)
+    .map((s) => `${s.proposedScheduleChange!.treatment}:${s.proposedScheduleChange!.currentWeeklyFrequency}→${s.proposedScheduleChange!.proposedWeeklyFrequency}:${firstChangeEntry(s.proposedScheduleChange)?.day}`)
+    .sort()
+    .join("|");
+  return assertEqual(sum1, sum2, "ordem rows não altera propostas");
+});
+
+test("66 ordem de construção das chaves do schedule não altera resultado", () => {
+  const rows = buildNegativeRowsFor("Hidratação");
+  const overrides: Partial<ScheduleFocusWeek<ScheduleFocus>> = { tuesday: "Hidratação", saturday: "Hidratação" };
+  const ctxA: DiaryIntelligenceScheduleContext = {
+    source: "app",
+    weeklySchedule: {
+      monday: "Hidratação",
+      tuesday: "Hidratação",
+      wednesday: "Nutrição",
+      thursday: "Descanso",
+      friday: "Hidratação",
+      saturday: "Hidratação",
+      sunday: "Cuidado",
+    },
+  };
+  const ctxB: DiaryIntelligenceScheduleContext = {
+    source: "app",
+    weeklySchedule: {
+      sunday: "Cuidado",
+      saturday: "Hidratação",
+      friday: "Hidratação",
+      thursday: "Descanso",
+      wednesday: "Nutrição",
+      tuesday: "Hidratação",
+      monday: "Hidratação",
+    },
+  };
+  void overrides;
+  const rA = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctxA });
+  const rB = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctxB });
+  const changesA = rA.suggestions
+    .filter((s) => s.proposedScheduleChange !== null)
+    .map((s) => s.summaryKey)
+    .sort()
+    .join(",");
+  const changesB = rB.suggestions
+    .filter((s) => s.proposedScheduleChange !== null)
+    .map((s) => s.summaryKey)
+    .sort()
+    .join(",");
+  return assertEqual(changesA, changesB, "ordem propriedades não altera");
+});
+
+test("67 evidência/signal rastreável na proposta", () => {
+  const rows = buildNegativeRowsFor("Nutrição");
+  const ctx = buildScheduleContext({ friday: "Nutrição" });
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const sig = r.signals.find(
+    (s) => s.id === "treatment_negative_associated" && s.evidence.type === "treatment_perceived_pattern" && s.evidence.treatment === "Nutrição",
+  );
+  const sug = findNegativeSuggestionFor(r.suggestions, "Nutrição");
+  const change = sug?.proposedScheduleChange ?? null;
+  return assertTrue(!!sig && !!change, "signal e change existem") &&
+    assertEqual(change.sourceSignalId, sig.id, "sourceSignalId bate") &&
+    assertEqual(change.treatment, "Nutrição", "treatment bate") &&
+    assertTrue(sig.summaryKey.includes("Nutrição"), "summaryKey contém treatment");
+});
+
+test("68 replacement não inventado (proposedValue/proposedFocus null)", () => {
+  const rowsN = buildNegativeRowsFor("Nutrição");
+  const rowsH = buildNegativeRowsFor("Hidratação");
+  const rows = [...rowsN, ...rowsH];
+  const ctx = buildScheduleContext({ thursday: "Nutrição", saturday: "Hidratação" });
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const entries = r.suggestions
+    .filter((s) => s.proposedScheduleChange !== null)
+    .flatMap((s) => s.proposedScheduleChange!.entries);
+  return assertTrue(entries.length >= 2, "entries existem") &&
+    assertTrue(entries.every((e) => e.proposedFocus === null), "proposedFocus sempre null") &&
+    assertTrue(entries.every((e) => e.proposedValue === null), "proposedValue sempre null");
+});
+
+test("69 nenhum texto causal/proibido em propostas e descrições", () => {
+  const rowsN = buildNegativeRowsFor("Nutrição");
+  const rowsH = buildNegativeRowsFor("Hidratação");
+  const rows = [...rowsN, ...rowsH];
+  const ctx = buildScheduleContext({ thursday: "Nutrição", saturday: "Hidratação" });
+  const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY, scheduleContext: ctx });
+  const haystack = JSON.stringify({ suggestions: r.suggestions });
+  const banned = [
+    "ressecando",
+    "está fazendo mal",
+    "precisa de menos",
+    "vai melhorar",
+    "Recomendamos remover",
+    "causou",
+    "causou",
+    "responsável",
+    "melhorar",
+  ];
+  return assertTrue(banned.every((b) => !haystack.includes(b)), "banned ausentes em propostas");
+});
+
+test("70 API antiga sem scheduleContext continua compatível (não lança, sinais existem, change=null)", () => {
+  const rows = buildNegativeRowsFor("Nutrição");
+  try {
+    const r = computeDiaryIntelligence({ rows, today: REFERENCE_TODAY });
+    const sug = findNegativeSuggestionFor(r.suggestions, "Nutrição");
+    return assertTrue(r.signals.length >= 1, "signals existem") &&
+      assertTrue(r.suggestions.length >= 1, "suggestions existem") &&
+      assertTrue(!!sug, "sug existe Nutrição") &&
+      assertEqual(sug.proposedScheduleChange, null, "change null (compat)");
+  } catch (err) {
+    console.error(`  compat API antiga falhou: ${(err as Error).message}`);
+    return false;
+  }
 });
 
 const totalInt = total;

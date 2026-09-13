@@ -16,7 +16,11 @@ import {
   type TreatmentPatternsResult,
   type WeeklySummary,
 } from "@/lib/diary-analysis";
-import type { ScheduleFocus, ScheduleSource } from "@/constants/schedule-defaults";
+import type {
+  ScheduleFocus,
+  ScheduleSource,
+  ScheduleFocusWeek,
+} from "@/constants/schedule-defaults";
 import { parseScheduleSource } from "@/constants/schedule-defaults";
 
 export type IntelligenceConfidence = "insufficient" | "low" | "moderate" | "high";
@@ -167,15 +171,27 @@ export const WEEKDAY_KEYS = [
 
 export type ProposedScheduleChangeEntry = {
   readonly day: ProposedScheduleChangeDay;
+  readonly affectedDay?: ProposedScheduleChangeDay;
   readonly currentFocus: ScheduleFocus;
-  readonly proposedFocus: ScheduleFocus;
+  readonly currentValue?: ScheduleFocus;
+  readonly proposedFocus: ScheduleFocus | null;
+  readonly proposedValue?: ScheduleFocus | null;
+  readonly action?: "reduce_frequency";
+  readonly treatment?: ScheduleFocus;
+  readonly currentWeeklyFrequency?: number;
+  readonly proposedWeeklyFrequency?: number;
+  readonly requiresExplicitConfirmation?: true;
 };
 
 export type ProposedScheduleChange = {
-  readonly changeType: "focus_replacement";
+  readonly changeType: "focus_replacement" | "reduce_frequency";
   readonly entries: readonly ProposedScheduleChangeEntry[];
   readonly description: string;
   readonly executable: false;
+  readonly sourceSignalId?: IntelligenceSignalId;
+  readonly treatment?: ScheduleFocus;
+  readonly currentWeeklyFrequency?: number;
+  readonly proposedWeeklyFrequency?: number;
 };
 
 export function emptyProposedScheduleChange(): ProposedScheduleChange {
@@ -203,6 +219,11 @@ export type SplitWindows = {
   readonly previousWindowStartCivilKey: string;
   readonly previousWindowEndCivilKey: string;
   readonly previousRows: readonly DiaryEntryRow[];
+};
+
+export type DiaryIntelligenceScheduleContext = {
+  readonly source: ScheduleSource;
+  readonly weeklySchedule: ScheduleFocusWeek<ScheduleFocus>;
 };
 
 export type IntelligenceOutput = {
@@ -680,8 +701,64 @@ export function sortSignalsDeterministically(
   return signals.slice().sort(compareSignalsDeterministic);
 }
 
+const ADJUSTABLE_FOCUS_SET = new Set<string>(["Hidratação", "Nutrição", "Reconstrução"]);
+
+function isAdjustableScheduleFocus(value: unknown): value is ScheduleFocus {
+  return typeof value === "string" && ADJUSTABLE_FOCUS_SET.has(value);
+}
+
+function buildReduceFrequencyForSignal(
+  signal: IntelligenceSignal,
+  ctx: DiaryIntelligenceScheduleContext | undefined,
+): ProposedScheduleChange | null {
+  if (!ctx) return null;
+  if (parseScheduleSource(ctx.source) !== "app") return null;
+  if (signal.id !== "treatment_negative_associated") return null;
+  const ev = signal.evidence;
+  if (ev.type !== "treatment_perceived_pattern") return null;
+  const t = ev.treatment;
+  if (!isAdjustableScheduleFocus(t)) return null;
+  const occurrences: Array<{
+    readonly day: ProposedScheduleChangeDay;
+    readonly focus: ScheduleFocus;
+  }> = [];
+  for (const day of WEEKDAY_KEYS) {
+    const focus = ctx.weeklySchedule[day];
+    if (focus === t) occurrences.push({ day, focus });
+  }
+  if (occurrences.length <= 1) return null;
+  const last = occurrences[occurrences.length - 1];
+  const currentFreq = occurrences.length;
+  const proposedFreq = currentFreq - 1;
+  if (proposedFreq < 0) return null;
+  const entry: ProposedScheduleChangeEntry = {
+    day: last.day,
+    affectedDay: last.day,
+    currentFocus: last.focus,
+    currentValue: last.focus,
+    proposedFocus: null,
+    proposedValue: null,
+    action: "reduce_frequency",
+    treatment: t,
+    currentWeeklyFrequency: currentFreq,
+    proposedWeeklyFrequency: proposedFreq,
+    requiresExplicitConfirmation: true,
+  };
+  return {
+    changeType: "reduce_frequency",
+    entries: Object.freeze([entry]),
+    description: `Seu cronograma atual tem ${t} ${currentFreq} vezes por semana. Uma opção é reduzir para ${proposedFreq} vez${proposedFreq === 1 ? "" : "es"} por semana.`,
+    executable: false,
+    sourceSignalId: signal.id,
+    treatment: t,
+    currentWeeklyFrequency: currentFreq,
+    proposedWeeklyFrequency: proposedFreq,
+  };
+}
+
 function convertSignalsToSuggestions(
   signals: readonly IntelligenceSignal[],
+  scheduleContext?: DiaryIntelligenceScheduleContext,
 ): readonly IntelligenceSuggestion[] {
   const applicability: SuggestionApplicability = {
     scheduleSourceApplicable: true,
@@ -700,13 +777,14 @@ function convertSignalsToSuggestions(
       } as const satisfies IntelligenceSuggestion;
     }
     if (s.id === "treatment_negative_associated") {
+      const proposed = buildReduceFrequencyForSignal(s, scheduleContext);
       return {
         id: "observe_treatment_response",
         confidence: s.confidence,
         evidence: s.evidence,
         summaryKey: `observe_${s.summaryKey}`,
         applicability,
-        proposedScheduleChange: null,
+        proposedScheduleChange: proposed,
       } as const satisfies IntelligenceSuggestion;
     }
     if (s.id === "recurring_dryness") {
@@ -743,6 +821,7 @@ function convertSignalsToSuggestions(
 export function computeDiaryIntelligence(input: {
   readonly rows: readonly DiaryEntryRow[];
   readonly today: Date;
+  readonly scheduleContext?: DiaryIntelligenceScheduleContext;
 }): IntelligenceOutput {
   const todayNoon = new Date(
     input.today.getFullYear(),
@@ -794,7 +873,7 @@ export function computeDiaryIntelligence(input: {
   const combined: IntelligenceSignal[] = [...treatmentPerceivedSignals, ...drynessSignals];
   if (comparisonSignal) combined.push(comparisonSignal);
   const signals = sortSignalsDeterministically(combined);
-  const suggestions = convertSignalsToSuggestions(signals);
+  const suggestions = convertSignalsToSuggestions(signals, input.scheduleContext);
   return {
     signals,
     suggestions,
