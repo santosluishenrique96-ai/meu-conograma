@@ -5,12 +5,19 @@ import { toast } from "sonner";
 import { SiteHeader } from "@/components/SiteHeader";
 import { FeatureAccessGuard } from "@/components/feature-access-guard";
 import { useAuth } from "@/hooks/use-auth";
-import { useDiaryEntriesInRange, useDiaryEntriesList, useDiaryEntryByDate, useDiaryUpsertEntry } from "@/hooks/use-diary";
+import {
+  useDiaryEntriesInRange,
+  useDiaryEntriesList,
+  useDiaryEntryByDate,
+  useDiaryUpsertEntry,
+} from "@/hooks/use-diary";
 import { DiaryEntryForm } from "@/components/diary/DiaryEntryForm";
 import { DiaryHistory } from "@/components/diary/DiaryHistory";
+import { IntelligentAdjustmentsCard } from "@/components/diary/IntelligentAdjustmentsCard";
 import { TreatmentPatternsCard } from "@/components/diary/TreatmentPatternsCard";
 import { WeeklySummaryCard } from "@/components/diary/WeeklySummaryCard";
 import { computeTreatmentPatterns, computeWeeklySummary } from "@/lib/diary-analysis";
+import { computeDiaryIntelligence } from "@/lib/diary-intelligence";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -199,10 +206,22 @@ function DiarioPage() {
   );
   const weekRows = weekRange.data ?? [];
 
-  const weeklySummary = useMemo(
-    () => computeWeeklySummary(weekRows, today),
-    [weekRows, today],
+  const intelRangeFromKey = useMemo(() => localCivilDateKey(addDays(today, -27)), [today]);
+  const intelRange = useDiaryEntriesInRange(
+    { from: intelRangeFromKey, to: weekRangeToKey },
+    enabledEntry,
   );
+  const intelRows = intelRange.data ?? [];
+
+  const intelOutput = useMemo(() => {
+    if (!enabledEntry) return null;
+    return computeDiaryIntelligence({
+      rows: intelRows,
+      today,
+    });
+  }, [enabledEntry, intelRows, today]);
+
+  const weeklySummary = useMemo(() => computeWeeklySummary(weekRows, today), [weekRows, today]);
   const treatmentPatterns = useMemo(() => computeTreatmentPatterns(weekRows), [weekRows]);
 
   const onRegisterToday = useCallback(() => {
@@ -382,8 +401,7 @@ function DiarioPage() {
                   <AlertTitle>Não foi possível carregar o resumo da semana.</AlertTitle>
                   <AlertDescription className="mt-2 flex items-center gap-2">
                     <span>
-                      {(weekRange.error as Error)?.message ??
-                        "Tente novamente em alguns minutos."}
+                      {(weekRange.error as Error)?.message ?? "Tente novamente em alguns minutos."}
                     </span>
                     <Button
                       size="sm"
@@ -410,14 +428,33 @@ function DiarioPage() {
                 </div>
               ) : (
                 <>
-                  <WeeklySummaryCard
-                    summary={weeklySummary}
-                    onRegisterToday={onRegisterToday}
-                  />
+                  <WeeklySummaryCard summary={weeklySummary} onRegisterToday={onRegisterToday} />
                   <TreatmentPatternsCard
                     result={treatmentPatterns}
                     onRegisterToday={onRegisterToday}
                   />
+                  {intelRange.error ? (
+                    <IntelligentAdjustmentsCard
+                      result={null}
+                      isLoading={false}
+                      isError={true}
+                      onRegisterToday={onRegisterToday}
+                    />
+                  ) : intelRange.isLoading && !intelRange.data ? (
+                    <IntelligentAdjustmentsCard
+                      result={null}
+                      isLoading={true}
+                      isError={false}
+                      onRegisterToday={onRegisterToday}
+                    />
+                  ) : (
+                    <IntelligentAdjustmentsCard
+                      result={intelOutput}
+                      isLoading={false}
+                      isError={false}
+                      onRegisterToday={onRegisterToday}
+                    />
+                  )}
                 </>
               )}
             </TabsContent>
