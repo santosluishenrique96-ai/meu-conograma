@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { toast } from "sonner";
 import {
@@ -17,7 +17,86 @@ import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
 import { useAuth } from "@/hooks/use-auth";
 
+const ALLOWED_POST_AUTH_REDIRECT_TARGETS = new Set<string>(["/assinatura", "/cronograma"]);
+const DEFAULT_POST_AUTH_REDIRECT = "/cronograma";
+const ALLOWED_PLAN_SLUGS = new Set<string>(["gratuito", "essencial", "premium"]);
+const ALLOWED_BILLING_INTERVALS = new Set<string>(["monthly", "annual"]);
+type BillingInterval = "monthly" | "annual";
+
+type SanitizedAuthSearch = {
+  redirectTo: string | undefined;
+  plan: string | undefined;
+  billing: BillingInterval | undefined;
+};
+
+type ResolvedAuthSearch = {
+  redirectTo: string;
+  plan: string | undefined;
+  billing: BillingInterval;
+};
+
+function sanitizeAuthSearchParams(raw: Record<string, unknown>): SanitizedAuthSearch {
+  const rawRedirect = typeof raw.redirectTo === "string" ? raw.redirectTo.trim() : "";
+  const hasExternalSignals =
+    rawRedirect.startsWith("http:") ||
+    rawRedirect.startsWith("https:") ||
+    rawRedirect.startsWith("//") ||
+    rawRedirect.startsWith("javascript:") ||
+    rawRedirect.startsWith("data:");
+  const redirectTo =
+    !hasExternalSignals && ALLOWED_POST_AUTH_REDIRECT_TARGETS.has(rawRedirect)
+      ? rawRedirect
+      : undefined;
+
+  const rawPlan = typeof raw.plan === "string" ? raw.plan.trim() : "";
+  const plan = ALLOWED_PLAN_SLUGS.has(rawPlan) ? rawPlan : undefined;
+
+  const rawBilling = typeof raw.billing === "string" ? raw.billing.trim() : "";
+  const billing: BillingInterval | undefined =
+    rawBilling === "annual" || rawBilling === "monthly" ? rawBilling : undefined;
+
+  return { redirectTo, plan, billing };
+}
+
+function resolveAuthSearch(search: SanitizedAuthSearch): ResolvedAuthSearch {
+  return {
+    redirectTo: search.redirectTo ?? DEFAULT_POST_AUTH_REDIRECT,
+    plan: search.plan,
+    billing: search.billing ?? "monthly",
+  };
+}
+
+function buildPostAuthRedirectParams(
+  ctx: ResolvedAuthSearch,
+): Record<string, string> {
+  if (ctx.redirectTo !== "/assinatura") return {};
+  const params: Record<string, string> = {};
+  if (ctx.plan) params.plan = ctx.plan;
+  params.billing = ctx.billing;
+  return params;
+}
+
+function buildReturnUrl(ctx: ResolvedAuthSearch): string {
+  const base = `${window.location.origin}${ctx.redirectTo}`;
+  if (ctx.redirectTo !== "/assinatura") return base;
+  const search = new URLSearchParams();
+  if (ctx.plan) search.set("plan", ctx.plan);
+  search.set("billing", ctx.billing);
+  const query = search.toString();
+  return query ? `${base}?${query}` : base;
+}
+
+function buildAuthReturnUrl(ctx: ResolvedAuthSearch): string {
+  const base = `${window.location.origin}/auth`;
+  const search = new URLSearchParams();
+  search.set("redirectTo", ctx.redirectTo);
+  if (ctx.plan) search.set("plan", ctx.plan);
+  search.set("billing", ctx.billing);
+  return `${base}?${search.toString()}`;
+}
+
 export const Route = createFileRoute("/auth")({
+  validateSearch: (raw: Record<string, unknown>) => sanitizeAuthSearchParams(raw),
   head: () => ({
     meta: [
       { title: "Entrar — Meu Cronograma" },
@@ -63,6 +142,8 @@ function translateAuthError(error: Error | string): string {
 
 function AuthPage() {
   const navigate = useNavigate();
+  const rawSearch = Route.useSearch();
+  const search = resolveAuthSearch(rawSearch);
   const { session, loading: authLoading } = useAuth();
   const [mode, setMode] = useState<"login" | "signup" | "forgot">("login");
   const [name, setName] = useState("");
@@ -71,12 +152,21 @@ function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const redirectHandledRef = useRef(false);
 
   useEffect(() => {
-    if (!authLoading && session) {
-      navigate({ to: "/cronograma" });
-    }
-  }, [session, authLoading, navigate]);
+    if (authLoading) return;
+    if (!session) return;
+    if (redirectHandledRef.current) return;
+    redirectHandledRef.current = true;
+
+    const target =
+      search.redirectTo === "/auth" ? DEFAULT_POST_AUTH_REDIRECT : search.redirectTo;
+    navigate({
+      to: target,
+      search: buildPostAuthRedirectParams(search),
+    });
+  }, [session, authLoading, navigate, search]);
 
   if (authLoading) {
     return (
@@ -118,7 +208,7 @@ function AuthPage() {
           email: parsedEmail,
           password: parsedPassword,
           options: {
-            emailRedirectTo: `${window.location.origin}/cronograma`,
+            emailRedirectTo: buildAuthReturnUrl(search),
             data: { display_name: parsedName },
           },
         });
@@ -127,7 +217,12 @@ function AuthPage() {
 
         if (data?.session) {
           toast.success("Conta criada e conectada com sucesso!");
-          navigate({ to: "/cronograma" });
+          const target =
+            search.redirectTo === "/auth" ? DEFAULT_POST_AUTH_REDIRECT : search.redirectTo;
+          navigate({
+            to: target,
+            search: buildPostAuthRedirectParams(search),
+          });
         } else {
           toast.success("Conta criada! Verifique seu e-mail para confirmar a conta.");
         }
@@ -140,7 +235,12 @@ function AuthPage() {
         if (error) throw error;
 
         toast.success("Bem-vinda de volta!");
-        navigate({ to: "/cronograma" });
+        const target =
+          search.redirectTo === "/auth" ? DEFAULT_POST_AUTH_REDIRECT : search.redirectTo;
+        navigate({
+          to: target,
+          search: buildPostAuthRedirectParams(search),
+        });
       }
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -156,17 +256,17 @@ function AuthPage() {
   const handleGoogle = async () => {
     setBusy(true);
     try {
-      // Tentar via Lovable Auth primeiro
+      const callbackUrl = buildReturnUrl(search);
+
       const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: `${window.location.origin}/cronograma`,
+        redirect_uri: callbackUrl,
       });
 
       if (result?.error) {
-        // Fallback para Supabase nativo se houver falha
         const { error } = await supabase.auth.signInWithOAuth({
           provider: "google",
           options: {
-            redirectTo: `${window.location.origin}/cronograma`,
+            redirectTo: callbackUrl,
           },
         });
         if (error) throw error;
@@ -174,7 +274,12 @@ function AuthPage() {
       }
 
       if (result?.redirected) return;
-      navigate({ to: "/cronograma" });
+      const target =
+        search.redirectTo === "/auth" ? DEFAULT_POST_AUTH_REDIRECT : search.redirectTo;
+      navigate({
+        to: target,
+        search: buildPostAuthRedirectParams(search),
+      });
     } catch (err) {
       toast.error(translateAuthError(err as Error));
       setBusy(false);

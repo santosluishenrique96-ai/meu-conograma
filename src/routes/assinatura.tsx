@@ -5,7 +5,22 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { SubscriptionPlanShowcase } from "@/components/subscription-plan-showcase";
 import { useAuth } from "@/hooks/use-auth";
 
+type AssinaturaSearch = {
+  plan: string | undefined;
+  billing: "monthly" | "annual" | undefined;
+};
+
+const ALLOWED_PLAN_SLUGS = new Set<string>(["gratuito", "essencial", "premium"]);
+
 export const Route = createFileRoute("/assinatura")({
+  validateSearch: (raw: Record<string, unknown>): AssinaturaSearch => {
+    const rawPlan = typeof raw.plan === "string" ? raw.plan.trim() : "";
+    const plan = ALLOWED_PLAN_SLUGS.has(rawPlan) ? rawPlan : undefined;
+    const rawBilling = typeof raw.billing === "string" ? raw.billing.trim() : "";
+    const billing: "monthly" | "annual" | undefined =
+      rawBilling === "annual" || rawBilling === "monthly" ? rawBilling : undefined;
+    return { plan, billing };
+  },
   head: () => ({
     meta: [
       { title: "Assinatura — Meu Cronograma" },
@@ -21,12 +36,19 @@ export const Route = createFileRoute("/assinatura")({
 
 function AssinaturaPage() {
   const { user } = useAuth();
+  const rawSearch = Route.useSearch();
+  const billing = rawSearch.billing ?? "monthly";
+  const plan = rawSearch.plan;
 
   return (
     <div className="min-h-screen">
       <SiteHeader />
 
-      <SubscriptionPlanShowcase mode="page" />
+      <SubscriptionPlanShowcase
+        mode="page"
+        selectedPlanSlug={plan}
+        initialBillingMode={billing}
+      />
 
       <section className="container mx-auto px-4 pb-20">
         <div className="relative overflow-hidden rounded-3xl border border-primary/20 bg-gradient-card p-8 text-center md:p-12">

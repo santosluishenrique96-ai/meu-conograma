@@ -14,7 +14,11 @@ type BillingMode = "monthly" | "annual";
 
 type SubscriptionPlanShowcaseProps = {
   mode?: "preview" | "page";
+  selectedPlanSlug?: string | undefined;
+  initialBillingMode?: BillingMode;
 };
+
+const ALLOWED_PLAN_SLUGS = new Set<string>(["gratuito", "essencial", "premium"]);
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", {
@@ -70,14 +74,29 @@ function getPlanPriceLabel(
 
 export function SubscriptionPlanShowcase({
   mode = "page",
+  selectedPlanSlug,
+  initialBillingMode = "monthly",
 }: SubscriptionPlanShowcaseProps) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const catalogQuery = usePublicPlanCatalog();
-  const [billingMode, setBillingMode] = useState<BillingMode>("monthly");
+  const [billingMode, setBillingMode] = useState<BillingMode>(initialBillingMode);
   const prepareCheckoutMutation = useCreateBillingCheckoutSessionIntent();
 
   const plans = useMemo(() => catalogQuery.data ?? [], [catalogQuery.data]);
+
+  const normalizedSelectedSlug =
+    typeof selectedPlanSlug === "string" && ALLOWED_PLAN_SLUGS.has(selectedPlanSlug)
+      ? selectedPlanSlug
+      : undefined;
+  const activePlanSlugs = useMemo(
+    () => new Set(plans.filter((p) => p.is_active).map((p) => p.slug)),
+    [plans],
+  );
+  const effectiveSelectedSlug =
+    normalizedSelectedSlug && activePlanSlugs.has(normalizedSelectedSlug)
+      ? normalizedSelectedSlug
+      : undefined;
 
   const redirectToCheckout = (checkoutUrl: string | null, gatewayName: string) => {
     if (!checkoutUrl) {
@@ -91,7 +110,14 @@ export function SubscriptionPlanShowcase({
   const handleSubscribe = async (plan: SubscriptionPlanCatalogItem) => {
     if (!user) {
       toast.info(`Entre na sua conta para continuar com o plano ${plan.name}`);
-      navigate({ to: "/auth" });
+      navigate({
+        to: "/auth",
+        search: {
+          redirectTo: "/assinatura",
+          plan: plan.slug,
+          billing: billingMode,
+        },
+      });
       return;
     }
 
@@ -196,6 +222,7 @@ export function SubscriptionPlanShowcase({
                   plan.annual_price,
                   plan.promotional_price,
                 );
+                const isSelected = plan.is_active && plan.slug === effectiveSelectedSlug;
                 const isHighlighted =
                   plan.slug === "premium" ||
                   (plan.badge ?? "").toLowerCase().includes("popular") ||
@@ -204,7 +231,7 @@ export function SubscriptionPlanShowcase({
                 return (
                   <article
                     key={plan.id}
-                    className={`relative flex h-full flex-col overflow-hidden rounded-[2rem] border bg-background/70 p-6 backdrop-blur-xl transition-smooth hover:-translate-y-1 hover:shadow-glow ${isHighlighted ? "border-primary shadow-elegant" : "border-border"}`}
+                    className={`relative flex h-full flex-col overflow-hidden rounded-[2rem] border bg-background/70 p-6 backdrop-blur-xl transition-smooth hover:-translate-y-1 hover:shadow-glow ${isSelected ? "ring-2 ring-primary/80" : ""} ${isHighlighted ? "border-primary shadow-elegant" : "border-border"}`}
                     style={{
                       boxShadow: isHighlighted
                         ? `0 20px 60px ${plan.color}22`
