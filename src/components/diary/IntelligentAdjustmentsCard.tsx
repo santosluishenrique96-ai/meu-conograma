@@ -1,8 +1,16 @@
-import { AlertTriangle, Lightbulb, Sparkles } from "lucide-react";
+import { AlertTriangle, ChevronRight, Lightbulb, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { ScheduleFocus } from "@/constants/schedule-defaults";
 import type {
   IntelligenceOutput,
   IntelligenceSuggestion,
@@ -11,11 +19,29 @@ import type {
   TreatmentPerceivedEvidence,
 } from "@/lib/diary-intelligence";
 
+const APPLY_FOCUS_OPTIONS: readonly ScheduleFocus[] = [
+  "Hidratação",
+  "Nutrição",
+  "Reconstrução",
+  "Descanso",
+  "Cuidado",
+] as const;
+
+export interface IntelligentAdjustmentsApplyUi {
+  readonly affectedDay: ProposedScheduleChangeDay;
+  readonly currentValue: ScheduleFocus;
+  readonly selectedFocus: ScheduleFocus | null;
+  readonly onChangeFocus: (next: ScheduleFocus | null) => void;
+  readonly onRequestReview: () => void;
+  readonly isApplying: boolean;
+}
+
 export interface IntelligentAdjustmentsCardProps {
   result: IntelligenceOutput | null;
   isLoading: boolean;
   isError: boolean;
   onRegisterToday: () => void;
+  applyUi: IntelligentAdjustmentsApplyUi | null;
 }
 
 const WEEKDAY_LABEL: Record<ProposedScheduleChangeDay, string> = {
@@ -97,6 +123,7 @@ export function IntelligentAdjustmentsCard({
   isLoading,
   isError,
   onRegisterToday,
+  applyUi,
 }: IntelligentAdjustmentsCardProps) {
   if (isError) {
     return (
@@ -274,6 +301,88 @@ export function IntelligentAdjustmentsCard({
                             {WEEKDAY_LABEL[affectedDay]}
                           </span>
                         </p>
+                      ) : null}
+
+                      {applyUi && affectedDay && applyUi.affectedDay === affectedDay ? (
+                        <div className="mt-5 space-y-4 rounded-2xl border border-primary/25 bg-card/80 p-4">
+                          <div className="space-y-2">
+                            <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                              Novo foco para {WEEKDAY_LABEL[applyUi.affectedDay]}
+                            </div>
+                            <Select
+                              value={applyUi.selectedFocus ?? ""}
+                              onValueChange={(raw) => {
+                                const valid = APPLY_FOCUS_OPTIONS.includes(raw as ScheduleFocus)
+                                  ? (raw as ScheduleFocus)
+                                  : null;
+                                applyUi.onChangeFocus(valid);
+                              }}
+                              disabled={applyUi.isApplying}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecione o novo foco" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {APPLY_FOCUS_OPTIONS.map((opt) => {
+                                  const blocked = opt === applyUi.currentValue;
+                                  return (
+                                    <SelectItem
+                                      key={opt}
+                                      value={opt}
+                                      disabled={blocked}
+                                      className={blocked ? "opacity-50 cursor-not-allowed" : ""}
+                                    >
+                                      {opt}
+                                      {blocked ? " (atual)" : ""}
+                                    </SelectItem>
+                                  );
+                                })}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {applyUi.selectedFocus &&
+                          applyUi.selectedFocus !== applyUi.currentValue ? (
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                              <div className="rounded-xl border border-border bg-card/90 p-3">
+                                <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1">
+                                  Antes
+                                </div>
+                                <div className="text-sm font-bold tabular-nums text-foreground/95">
+                                  {WEEKDAY_LABEL[applyUi.affectedDay]} — {applyUi.currentValue}
+                                </div>
+                              </div>
+                              <div className="rounded-xl border border-primary/35 bg-primary/10 p-3">
+                                <div className="text-xs uppercase tracking-wider text-primary mb-1">
+                                  Depois
+                                </div>
+                                <div className="text-sm font-bold tabular-nums text-foreground">
+                                  {WEEKDAY_LABEL[applyUi.affectedDay]} — {applyUi.selectedFocus}
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
+
+                          <Button
+                            type="button"
+                            disabled={
+                              !applyUi.selectedFocus ||
+                              applyUi.selectedFocus === applyUi.currentValue ||
+                              applyUi.isApplying
+                            }
+                            onClick={applyUi.onRequestReview}
+                            className="w-full rounded-full shadow-glow"
+                          >
+                            {applyUi.isApplying ? (
+                              <>Aplicando…</>
+                            ) : (
+                              <>
+                                Revisar alteração
+                                <ChevronRight className="ml-1 h-4 w-4" />
+                              </>
+                            )}
+                          </Button>
+                        </div>
                       ) : null}
                     </div>
                   </>

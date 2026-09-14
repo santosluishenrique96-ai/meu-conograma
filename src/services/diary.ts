@@ -415,3 +415,88 @@ export async function upsertDiaryEntry(
   }
   return data as DiaryEntryRow;
 }
+
+export type ApplySingleDayFocusDayKey =
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday"
+  | "sunday";
+
+export type ApplySingleDayFocusResultSuccess = {
+  readonly status: "success";
+  readonly row: SchedulePreferencesRow;
+};
+
+export type ApplySingleDayFocusResultConflict = {
+  readonly status: "conflict";
+};
+
+export type ApplySingleDayFocusResult =
+  | ApplySingleDayFocusResultSuccess
+  | ApplySingleDayFocusResultConflict;
+
+const APPLY_SINGLE_DAY_KEYS_SET = new Set<ApplySingleDayFocusDayKey>([
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+]);
+
+function parseApplySingleDayKey(value: unknown): ApplySingleDayFocusDayKey | null {
+  if (typeof value !== "string") return null;
+  return APPLY_SINGLE_DAY_KEYS_SET.has(value as ApplySingleDayFocusDayKey)
+    ? (value as ApplySingleDayFocusDayKey)
+    : null;
+}
+
+export async function applySingleDayFocusChangeWithPrecondition(
+  userId: string,
+  affectedDay: ApplySingleDayFocusDayKey,
+  expectedCurrentFocus: ScheduleFocus,
+  chosenFocus: ScheduleFocus,
+): Promise<ApplySingleDayFocusResult> {
+  if (typeof userId !== "string" || userId.length === 0) {
+    throw new Error("UserId inválido para aplicar alteração de cronograma.");
+  }
+  const keyOk = parseApplySingleDayKey(affectedDay);
+  if (!keyOk) {
+    throw new Error("Dia afetado inválido para aplicar alteração de cronograma.");
+  }
+  const expectedOk = parseScheduleFocus(expectedCurrentFocus);
+  if (!expectedOk) {
+    throw new Error("Foco atual esperado inválido para aplicar alteração de cronograma.");
+  }
+  const chosenOk = parseScheduleFocus(chosenFocus);
+  if (!chosenOk) {
+    throw new Error("Novo foco escolhido inválido para aplicar alteração de cronograma.");
+  }
+  if (chosenOk === expectedOk) {
+    throw new Error("Novo foco escolhido deve ser diferente do foco atual.");
+  }
+  const { data, error } = await supabase
+    .from("schedule_preferences")
+    .update({ [affectedDay]: chosenOk } as Partial<SchedulePreferencesRow>)
+    .eq("user_id", userId)
+    .eq("schedule_source", "app")
+    .eq(affectedDay, expectedOk)
+    .select("*");
+  if (error) throw error;
+  if (!Array.isArray(data)) {
+    throw new Error("Resposta inesperada do Supabase ao aplicar alteração.");
+  }
+  if (data.length === 0) {
+    return { status: "conflict" };
+  }
+  if (data.length !== 1) {
+    throw new Error(
+      `Invariante violada: UPDATE de cronograma afetou ${data.length} linhas (esperava 0 ou 1).`,
+    );
+  }
+  return { status: "success", row: data[0] as SchedulePreferencesRow };
+}

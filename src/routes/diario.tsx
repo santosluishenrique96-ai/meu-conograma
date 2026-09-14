@@ -1,11 +1,19 @@
 import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, BookOpenCheck, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  AlertCircle,
+  AlertTriangle,
+  BookOpenCheck,
+  ChevronLeft,
+  ChevronRight,
+  Sparkles,
+} from "lucide-react";
 import { toast } from "sonner";
 import { SiteHeader } from "@/components/SiteHeader";
 import { FeatureAccessGuard } from "@/components/feature-access-guard";
 import { useAuth } from "@/hooks/use-auth";
+import { useFeatureAccess } from "@/hooks/use-subscription-permissions";
 import {
   useDiaryEntriesInRange,
   useDiaryEntriesList,
@@ -21,6 +29,7 @@ import { computeTreatmentPatterns, computeWeeklySummary } from "@/lib/diary-anal
 import {
   computeDiaryIntelligence,
   type DiaryIntelligenceScheduleContext,
+  type ProposedScheduleChangeDay,
 } from "@/lib/diary-intelligence";
 import {
   parseScheduleSource,
@@ -28,12 +37,26 @@ import {
   type ScheduleFocusWeek,
   type ScheduleSource,
 } from "@/constants/schedule-defaults";
-import { getSchedulePreferencesForUser } from "@/services/diary";
+import {
+  applySingleDayFocusChangeWithPrecondition,
+  getSchedulePreferencesForUser,
+  type ApplySingleDayFocusDayKey,
+} from "@/services/diary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const TAB_FORM = "form";
 const TAB_HISTORY = "history";
@@ -106,6 +129,16 @@ const WEEKDAY_KEYS = [
 ] as const;
 
 type WeekdayKey = (typeof WEEKDAY_KEYS)[number];
+
+const WEEKDAY_LABEL: Record<ProposedScheduleChangeDay, string> = {
+  monday: "Segunda-feira",
+  tuesday: "Terça-feira",
+  wednesday: "Quarta-feira",
+  thursday: "Quinta-feira",
+  friday: "Sexta-feira",
+  saturday: "Sábado",
+  sunday: "Domingo",
+};
 
 const VALID_FOCUS: ReadonlySet<ScheduleFocus> = new Set<ScheduleFocus>([
   "Hidratação",
@@ -211,6 +244,15 @@ function DiarioPage() {
   const selectedDateKey = useMemo(() => localCivilDateKey(selectedDate), [selectedDate]);
   const entryByDate = useDiaryEntryByDate(selectedDateKey, enabledEntry);
   const upsertMutation = useDiaryUpsertEntry();
+  const queryClient = useQueryClient();
+  const customScheduleAccess = useFeatureAccess("cronograma-personalizado", Boolean(user));
+  const canUseCustomSchedule = customScheduleAccess.data?.hasAccess ?? false;
+  const checkingCustomScheduleAccess = Boolean(user) && customScheduleAccess.isLoading;
+
+  const [confirmApplyDialogOpen, setConfirmApplyDialogOpen] = useState<boolean>(false);
+  const [selectedFocusForProposalRaw, setSelectedFocusForProposalRaw] =
+    useState<ScheduleFocus | null>(null);
+  const [lastProposalTrackingKey, setLastProposalTrackingKey] = useState<string>("");
 
   const listPageSize = 30;
   const listLimit = listPageSize * (page + 1);
@@ -328,6 +370,151 @@ function DiarioPage() {
   const onLoadMore = useCallback(async () => {
     setPage((p) => p + 1);
   }, []);
+
+  const currentEligibleProposal = useMemo(() => {
+    if (!user) return null;
+    if (!canUseCustomSchedule) return null;
+    if (checkingCustomScheduleAccess) return null;
+    if (schedulePrefsQuery.isLoading || schedulePrefsQuery.isFetching) return null;
+    if (schedulePrefsQuery.isError) return null;
+    const row = schedulePrefsQuery.data;
+    if (!row) return null;
+    const source = parseScheduleSource((row as Record<string, unknown>).schedule_source);
+    if (source !== "app") return null;
+    if (!intelOutput) return null;
+    for (const sug of intelOutput.suggestions) {
+      const change = sug.proposedScheduleChange;
+      if (!change) continue;
+      if (!change.entries || change.entries.length === 0) continue;
+      const entry = change.entries[0];
+      const day = entry.affectedDay ?? entry.day;
+      if (!day) continue;
+      const current = entry.currentValue ?? entry.currentFocus;
+      const currentOk = parseFocusStrict(current);
+      if (!currentOk) continue;
+      return {
+        affectedDay: day as ApplySingleDayFocusDayKey,
+        currentValue: currentOk as ScheduleFocus,
+        treatment: change.treatment ?? currentOk,
+        currentWeeklyFrequency: change.currentWeeklyFrequency ?? null,
+        proposedWeeklyFrequency: change.proposedWeeklyFrequency ?? null,
+      } as const;
+    }
+    return null;
+  }, [
+    user,
+    canUseCustomSchedule,
+    checkingCustomScheduleAccess,
+    schedulePrefsQuery.isLoading,
+    schedulePrefsQuery.isFetching,
+    schedulePrefsQuery.isError,
+    schedulePrefsQuery.data,
+    intelOutput,
+  ]);
+
+  const currentProposalTrackingKey = useMemo<string>(() => {
+    if (!currentEligibleProposal) return "";
+    return `${currentEligibleProposal.affectedDay}|${currentEligibleProposal.currentValue}|${currentEligibleProposal.treatment}`;
+  }, [currentEligibleProposal]);
+
+  const selectedFocusForProposal: ScheduleFocus | null =
+    lastProposalTrackingKey === currentProposalTrackingKey ? selectedFocusForProposalRaw : null;
+
+  const handleProposalFocusChange = useCallback(
+    (next: ScheduleFocus | null) => {
+      setLastProposalTrackingKey(currentProposalTrackingKey);
+      setSelectedFocusForProposalRaw(next);
+    },
+    [currentProposalTrackingKey],
+  );
+
+  const handleOpenReview = useCallback(() => {
+    if (!currentEligibleProposal) return;
+    if (!selectedFocusForProposal) return;
+    if (selectedFocusForProposal === currentEligibleProposal.currentValue) return;
+    setConfirmApplyDialogOpen(true);
+  }, [currentEligibleProposal, selectedFocusForProposal]);
+
+  const applyScheduleChangeMutation = useMutation({
+    mutationFn: async () => {
+      if (!user) {
+        toast.error("Faça login novamente para continuar.");
+        throw new Error("Usuário não autenticado.");
+      }
+      if (!canUseCustomSchedule) {
+        toast.info("Seu plano atual não libera personalização do cronograma");
+        navigate({ to: "/assinatura" });
+        throw new Error("Entitlement ausente.");
+      }
+      if (!currentEligibleProposal) {
+        throw new Error("Proposta não elegível no momento.");
+      }
+      if (!selectedFocusForProposal) {
+        throw new Error("Novo foco não selecionado.");
+      }
+      if (selectedFocusForProposal === currentEligibleProposal.currentValue) {
+        throw new Error("Novo foco deve ser diferente do atual.");
+      }
+      const row = schedulePrefsQuery.data;
+      if (!row) throw new Error("Cronograma não carregado.");
+      const source = parseScheduleSource((row as Record<string, unknown>).schedule_source);
+      if (source !== "app") {
+        throw new Error("Cronograma atual não permite ajustes automáticos.");
+      }
+      return applySingleDayFocusChangeWithPrecondition(
+        user.id,
+        currentEligibleProposal.affectedDay,
+        currentEligibleProposal.currentValue,
+        selectedFocusForProposal,
+      );
+    },
+    onSuccess: async (out) => {
+      if (!user) return;
+      if (out.status === "conflict") {
+        setConfirmApplyDialogOpen(false);
+        setLastProposalTrackingKey("");
+        setSelectedFocusForProposalRaw(null);
+        toast.info(
+          "Seu cronograma mudou desde que esta sugestão foi calculada. Atualizamos os dados para você revisar novamente.",
+        );
+        await queryClient.invalidateQueries({
+          queryKey: ["schedule_preferences", "for_user", user.id],
+        });
+        return;
+      }
+      setConfirmApplyDialogOpen(false);
+      setLastProposalTrackingKey("");
+      setSelectedFocusForProposalRaw(null);
+      toast.success("Ajuste no cronograma aplicado!");
+      await queryClient.invalidateQueries({
+        queryKey: ["schedule_preferences", "for_user", user.id],
+      });
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error && err.message.length > 0 ? err.message : undefined;
+      toast.error(msg ?? "Não foi possível aplicar o ajuste agora. Tente novamente.");
+    },
+  });
+
+  const applyUiForCard = useMemo(() => {
+    if (!currentEligibleProposal) return null;
+    if (applyScheduleChangeMutation.isPending && !confirmApplyDialogOpen) return null;
+    return {
+      affectedDay: currentEligibleProposal.affectedDay as ProposedScheduleChangeDay,
+      currentValue: currentEligibleProposal.currentValue,
+      selectedFocus: selectedFocusForProposal,
+      onChangeFocus: handleProposalFocusChange,
+      onRequestReview: handleOpenReview,
+      isApplying: applyScheduleChangeMutation.isPending,
+    } as const;
+  }, [
+    currentEligibleProposal,
+    applyScheduleChangeMutation.isPending,
+    confirmApplyDialogOpen,
+    selectedFocusForProposal,
+    handleProposalFocusChange,
+    handleOpenReview,
+  ]);
 
   const loading = authLoading;
 
@@ -535,6 +722,7 @@ function DiarioPage() {
                       isLoading={false}
                       isError={true}
                       onRegisterToday={onRegisterToday}
+                      applyUi={null}
                     />
                   ) : intelRange.isLoading && !intelRange.data ? (
                     <IntelligentAdjustmentsCard
@@ -542,6 +730,7 @@ function DiarioPage() {
                       isLoading={true}
                       isError={false}
                       onRegisterToday={onRegisterToday}
+                      applyUi={null}
                     />
                   ) : (
                     <IntelligentAdjustmentsCard
@@ -549,6 +738,7 @@ function DiarioPage() {
                       isLoading={false}
                       isError={false}
                       onRegisterToday={onRegisterToday}
+                      applyUi={applyUiForCard}
                     />
                   )}
                 </>
@@ -556,6 +746,94 @@ function DiarioPage() {
             </TabsContent>
           </Tabs>
         </FeatureAccessGuard>
+
+        <AlertDialog
+          open={confirmApplyDialogOpen}
+          onOpenChange={(next) => {
+            if (!next && !applyScheduleChangeMutation.isPending) {
+              setConfirmApplyDialogOpen(false);
+            } else if (next) {
+              setConfirmApplyDialogOpen(true);
+            }
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-500" /> Confirmar ajuste no cronograma?
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                {currentEligibleProposal && selectedFocusForProposal ? (
+                  <div className="space-y-4 pt-2">
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      Somente o dia selecionado abaixo será atualizado no seu cronograma sugerido.
+                    </p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="rounded-2xl border border-border bg-card/80 p-4">
+                        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1">
+                          De
+                        </div>
+                        <div className="text-base font-black tabular-nums text-foreground">
+                          {
+                            WEEKDAY_LABEL[
+                              currentEligibleProposal.affectedDay as ProposedScheduleChangeDay
+                            ]
+                          }{" "}
+                          — {currentEligibleProposal.currentValue}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-primary/30 bg-primary/10 p-4">
+                        <div className="text-xs uppercase tracking-wider text-primary mb-1">
+                          Para
+                        </div>
+                        <div className="text-base font-black tabular-nums text-foreground">
+                          {
+                            WEEKDAY_LABEL[
+                              currentEligibleProposal.affectedDay as ProposedScheduleChangeDay
+                            ]
+                          }{" "}
+                          — {selectedFocusForProposal}
+                        </div>
+                      </div>
+                    </div>
+                    <ul className="list-disc list-inside space-y-1 text-xs text-muted-foreground leading-relaxed pl-1">
+                      <li>Os outros 6 dias da semana permanecem inalterados.</li>
+                      <li>Seu tipo de cabelo e objetivo são preservados.</li>
+                      <li>A marcação de origem permanece Sugerido pelo Meu Cronograma.</li>
+                      <li>
+                        Registros históricos do seu Diário, incluindo snapshots do cronograma,
+                        <strong className="text-foreground/90"> não são alterados</strong>.
+                      </li>
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Não foi possível montar os detalhes do ajuste agora.
+                  </p>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={applyScheduleChangeMutation.isPending}>
+                Cancelar
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={
+                  !currentEligibleProposal ||
+                  !selectedFocusForProposal ||
+                  selectedFocusForProposal === currentEligibleProposal.currentValue ||
+                  applyScheduleChangeMutation.isPending
+                }
+                onClick={() => {
+                  applyScheduleChangeMutation.mutate();
+                }}
+                className="rounded-full shadow-glow"
+              >
+                {applyScheduleChangeMutation.isPending ? "Aplicando…" : "Confirmar alteração"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );
