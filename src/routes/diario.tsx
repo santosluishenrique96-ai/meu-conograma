@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AlertCircle, BookOpenCheck, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -17,7 +18,17 @@ import { IntelligentAdjustmentsCard } from "@/components/diary/IntelligentAdjust
 import { TreatmentPatternsCard } from "@/components/diary/TreatmentPatternsCard";
 import { WeeklySummaryCard } from "@/components/diary/WeeklySummaryCard";
 import { computeTreatmentPatterns, computeWeeklySummary } from "@/lib/diary-analysis";
-import { computeDiaryIntelligence } from "@/lib/diary-intelligence";
+import {
+  computeDiaryIntelligence,
+  type DiaryIntelligenceScheduleContext,
+} from "@/lib/diary-intelligence";
+import {
+  parseScheduleSource,
+  type ScheduleFocus,
+  type ScheduleFocusWeek,
+  type ScheduleSource,
+} from "@/constants/schedule-defaults";
+import { getSchedulePreferencesForUser } from "@/services/diary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -81,6 +92,64 @@ export const Route = createFileRoute("/diario")({
   }),
   component: DiarioPage,
 });
+
+type SchedulePreferencesRow = Awaited<ReturnType<typeof getSchedulePreferencesForUser>>;
+
+const WEEKDAY_KEYS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+] as const;
+
+type WeekdayKey = (typeof WEEKDAY_KEYS)[number];
+
+const VALID_FOCUS: ReadonlySet<ScheduleFocus> = new Set<ScheduleFocus>([
+  "Hidratação",
+  "Nutrição",
+  "Reconstrução",
+  "Descanso",
+  "Cuidado",
+]);
+
+function parseFocusStrict(value: unknown): ScheduleFocus | null {
+  if (typeof value !== "string") return null;
+  if (VALID_FOCUS.has(value as ScheduleFocus)) return value as ScheduleFocus;
+  return null;
+}
+
+function buildRealWeeklyScheduleOrNull(
+  row: SchedulePreferencesRow,
+): ScheduleFocusWeek<ScheduleFocus> | null {
+  const built = new Map<WeekdayKey, ScheduleFocus>();
+  for (const day of WEEKDAY_KEYS) {
+    const raw = (row as Record<string, unknown>)[day];
+    const focus = parseFocusStrict(raw);
+    if (!focus) return null;
+    built.set(day, focus);
+  }
+  return {
+    monday: built.get("monday")!,
+    tuesday: built.get("tuesday")!,
+    wednesday: built.get("wednesday")!,
+    thursday: built.get("thursday")!,
+    friday: built.get("friday")!,
+    saturday: built.get("saturday")!,
+    sunday: built.get("sunday")!,
+  };
+}
+
+function buildRealScheduleContextOrNull(
+  row: SchedulePreferencesRow,
+): DiaryIntelligenceScheduleContext | null {
+  const source = parseScheduleSource((row as Record<string, unknown>).schedule_source);
+  const weekly = buildRealWeeklyScheduleOrNull(row);
+  if (!weekly) return null;
+  return { source, weeklySchedule: weekly };
+}
 
 function isSameLocalDay(a: Date, b: Date) {
   return (
@@ -213,13 +282,40 @@ function DiarioPage() {
   );
   const intelRows = intelRange.data ?? [];
 
+  const schedulePrefsQuery = useQuery({
+    queryKey: ["schedule_preferences", "for_user", user?.id ?? ""],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      return getSchedulePreferencesForUser(user.id);
+    },
+    enabled: Boolean(user?.id),
+    staleTime: 60_000,
+  });
+
+  const intelScheduleContext: DiaryIntelligenceScheduleContext | null = useMemo(() => {
+    const row = schedulePrefsQuery.data;
+    if (!row) return null;
+    return buildRealScheduleContextOrNull(row);
+  }, [schedulePrefsQuery.data]);
+
+  const intelScheduleResolved: boolean =
+    !schedulePrefsQuery.isLoading && !schedulePrefsQuery.isFetching;
+
   const intelOutput = useMemo(() => {
     if (!enabledEntry) return null;
+    if (!intelScheduleResolved && Boolean(user)) return null;
+    if (intelScheduleContext) {
+      return computeDiaryIntelligence({
+        rows: intelRows,
+        today,
+        scheduleContext: intelScheduleContext,
+      });
+    }
     return computeDiaryIntelligence({
       rows: intelRows,
       today,
     });
-  }, [enabledEntry, intelRows, today]);
+  }, [enabledEntry, intelRows, today, intelScheduleContext, intelScheduleResolved, user]);
 
   const weeklySummary = useMemo(() => computeWeeklySummary(weekRows, today), [weekRows, today]);
   const treatmentPatterns = useMemo(() => computeTreatmentPatterns(weekRows), [weekRows]);

@@ -229,7 +229,7 @@ export function buildScheduleFocusSnapshot(
   };
 }
 
-async function getSchedulePreferencesForUser(
+export async function getSchedulePreferencesForUser(
   userId: string,
 ): Promise<SchedulePreferencesRow | null> {
   const { data, error } = await supabase
